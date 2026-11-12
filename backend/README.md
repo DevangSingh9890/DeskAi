@@ -87,6 +87,22 @@ An empty or whitespace-only message is rejected with HTTP 422. If the Groq API
 key is missing, the endpoint responds with HTTP 503; upstream Groq failures
 respond with HTTP 502.
 
+### `POST /api/documents/upload`
+
+Upload a PDF, DOCX, or TXT file as multipart form data using the `file` field.
+The backend stores uploaded files in `backend/uploads/` and returns a generated
+document ID, original filename, byte size, and upload timestamp. Empty files and
+unsupported file extensions are rejected with HTTP 400.
+
+### `GET /api/documents`
+
+Returns the uploaded document IDs, original filenames, and byte sizes.
+
+### `DELETE /api/documents/{document_id}`
+
+Deletes an uploaded document by its ID. Returns HTTP 404 if the document does
+not exist.
+
 Run the backend tests with:
 
 ```powershell
