@@ -1,121 +1,99 @@
 import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
+import { ChatWindow } from './components/ChatWindow'
+import { getChatErrorMessage, sendChatMessage } from './services/api'
+import type { ChatMessage } from './types/chat'
 import './App.css'
 
+const greeting: ChatMessage = {
+  id: 'welcome',
+  role: 'assistant',
+  content: "Hello, I'm your AI Service Desk Assistant. How can I help you today?",
+  timestamp: new Date(),
+}
+
 function App() {
-  const [count, setCount] = useState(0)
+  const [messages, setMessages] = useState<ChatMessage[]>([greeting])
+  const [draft, setDraft] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleSend() {
+    const message = draft.trim()
+    if (!message || isLoading) return
+
+    const userMessage: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: message,
+      timestamp: new Date(),
+    }
+
+    setMessages((currentMessages) => [...currentMessages, userMessage])
+    setDraft('')
+    setError(null)
+    setIsLoading(true)
+
+    try {
+      const response = await sendChatMessage(message)
+      setMessages((currentMessages) => [
+        ...currentMessages,
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: response,
+          timestamp: new Date(),
+        },
+      ])
+    } catch (requestError: unknown) {
+      setError(getChatErrorMessage(requestError))
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    <div className="app-shell">
+      <header className="app-header">
+        <a className="brand" href="/" aria-label="DeskAI home">
+          <span className="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32">
+              <path d="M16 3.5 19.1 12l8.4 4-8.4 3.1L16 28.5 12.9 19l-8.4-3 8.4-4L16 3.5Z" />
+              <path d="m25.5 3 .9 2.6L29 6.5l-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9.9-2.6Z" />
+            </svg>
+          </span>
+          <span className="brand-name">Desk<span>AI</span></span>
+        </a>
 
-      <div className="ticks"></div>
+        <div className="header-divider" aria-hidden="true" />
+        <span className="header-product-name">AI Service Desk Assistant</span>
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
+        <div className="header-status">
+          <span className="status-dot" aria-hidden="true" />
+          Here to help
         </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+      </header>
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+      <div className="page-content">
+        <div className="page-overline">
+          <span className="page-overline-line" />
+          <span>SUPPORT, MADE SIMPLE</span>
+          <span className="page-overline-line" />
+        </div>
+        <ChatWindow
+          messages={messages}
+          draft={draft}
+          isLoading={isLoading}
+          error={error}
+          onDraftChange={setDraft}
+          onSend={handleSend}
+          onSelectSuggestion={setDraft}
+        />
+        <footer className="page-footer">
+          <span>Need urgent help?</span>
+          <span>Contact your IT support team directly.</span>
+        </footer>
+      </div>
+    </div>
   )
 }
 
