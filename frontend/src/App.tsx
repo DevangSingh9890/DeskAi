@@ -1,8 +1,11 @@
 import { useState } from 'react'
 import { ChatWindow } from './components/ChatWindow'
+import { KnowledgeBase } from './components/KnowledgeBase'
 import { getChatErrorMessage, sendChatMessage } from './services/api'
 import type { ChatMessage } from './types/chat'
 import './App.css'
+
+type Page = 'chat' | 'knowledge'
 
 const greeting: ChatMessage = {
   id: 'welcome',
@@ -16,6 +19,7 @@ function App() {
   const [draft, setDraft] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [page, setPage] = useState<Page>('chat')
 
   async function handleSend() {
     const message = draft.trim()
@@ -67,6 +71,25 @@ function App() {
         <div className="header-divider" aria-hidden="true" />
         <span className="header-product-name">AI Service Desk Assistant</span>
 
+        <nav className="app-navigation" aria-label="Main navigation">
+          <button
+            className={`navigation-link ${page === 'chat' ? 'navigation-link--active' : ''}`}
+            type="button"
+            aria-current={page === 'chat' ? 'page' : undefined}
+            onClick={() => setPage('chat')}
+          >
+            Chat
+          </button>
+          <button
+            className={`navigation-link ${page === 'knowledge' ? 'navigation-link--active' : ''}`}
+            type="button"
+            aria-current={page === 'knowledge' ? 'page' : undefined}
+            onClick={() => setPage('knowledge')}
+          >
+            Knowledge Base
+          </button>
+        </nav>
+
         <div className="header-status">
           <span className="status-dot" aria-hidden="true" />
           Here to help
@@ -74,20 +97,26 @@ function App() {
       </header>
 
       <div className="page-content">
-        <div className="page-overline">
-          <span className="page-overline-line" />
-          <span>SUPPORT, MADE SIMPLE</span>
-          <span className="page-overline-line" />
-        </div>
-        <ChatWindow
-          messages={messages}
-          draft={draft}
-          isLoading={isLoading}
-          error={error}
-          onDraftChange={setDraft}
-          onSend={handleSend}
-          onSelectSuggestion={setDraft}
-        />
+        {page === 'chat' ? (
+          <>
+            <div className="page-overline">
+              <span className="page-overline-line" />
+              <span>SUPPORT, MADE SIMPLE</span>
+              <span className="page-overline-line" />
+            </div>
+            <ChatWindow
+              messages={messages}
+              draft={draft}
+              isLoading={isLoading}
+              error={error}
+              onDraftChange={setDraft}
+              onSend={handleSend}
+              onSelectSuggestion={setDraft}
+            />
+          </>
+        ) : (
+          <KnowledgeBase />
+        )}
         <footer className="page-footer">
           <span>Need urgent help?</span>
           <span>Contact your IT support team directly.</span>

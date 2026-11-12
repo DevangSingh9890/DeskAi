@@ -96,7 +96,8 @@ unsupported file extensions are rejected with HTTP 400.
 
 ### `GET /api/documents`
 
-Returns the uploaded document IDs, original filenames, and byte sizes.
+Returns the uploaded document IDs, original filenames, byte sizes, and upload
+timestamps.
 
 ### `DELETE /api/documents/{document_id}`
 

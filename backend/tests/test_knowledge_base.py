@@ -45,6 +45,7 @@ class KnowledgeBaseRouteTests(unittest.TestCase):
                     "id": uploaded["id"],
                     "filename": "VPN_Guide.PDF",
                     "size": len(b"pdf content"),
+                    "uploaded_at": uploaded["uploaded_at"],
                 }
             ],
         )

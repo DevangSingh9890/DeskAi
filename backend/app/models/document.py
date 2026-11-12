@@ -16,6 +16,7 @@ class DocumentSummary(BaseModel):
     id: str
     filename: str
     size: int
+    uploaded_at: datetime
 
 
 class DocumentDeleteResponse(BaseModel):

@@ -128,6 +128,7 @@ def list_documents() -> list[DocumentSummary]:
                     id=document.id,
                     filename=document.filename,
                     size=document.size,
+                    uploaded_at=document.uploaded_at,
                 )
             )
     except OSError as exc:
