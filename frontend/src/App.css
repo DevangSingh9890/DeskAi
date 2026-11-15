@@ -540,6 +540,76 @@
   background: #c0c4d0;
 }
 
+.document-indexing-row {
+  margin-top: 5px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #858b9d;
+  font-size: 7px;
+}
+
+.document-ingestion-status {
+  font-weight: 650;
+}
+
+.document-ingestion-status--indexed {
+  color: #338365;
+}
+
+.document-ingestion-status--processing {
+  color: #7472c2;
+}
+
+.document-ingestion-status--failed {
+  color: #b94e58;
+}
+
+.document-ingestion-status--uploaded {
+  color: #858b9d;
+}
+
+.document-indexing-indicator {
+  width: 28px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: #ececf5;
+}
+
+.document-indexing-indicator span {
+  display: block;
+  width: 40%;
+  height: 100%;
+  border-radius: inherit;
+  background: #7774ce;
+  animation: indexing-progress 1s ease-in-out infinite alternate;
+}
+
+.document-processing-error {
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: #b94e58;
+  font-size: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-progress-track--indeterminate > span {
+  width: 38%;
+  animation: indexing-progress 1s ease-in-out infinite alternate;
+}
+
+@keyframes indexing-progress {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(160%);
+  }
+}
+
 .document-delete-button {
   flex: none;
   width: 25px;

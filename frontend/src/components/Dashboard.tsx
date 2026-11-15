@@ -6,9 +6,14 @@ import {
   deleteDocument,
   getDocumentErrorMessage,
   getDocuments,
+  getDocumentStatus,
   uploadDocument,
 } from '../services/documentService'
-import type { DocumentSummary } from '../services/documentService'
+import type {
+  DocumentJobStatus,
+  DocumentSummary,
+  IngestionStatus,
+} from '../services/documentService'
 import { getChatErrorMessage, sendChatMessage } from '../services/api'
 import type { ChatMessage } from '../types/chat'
 
@@ -17,6 +22,13 @@ const greeting: ChatMessage = {
   role: 'assistant',
   content: "Hello, I'm your AI Service Desk Assistant. How can I help you today?",
   timestamp: new Date(),
+}
+
+const ingestionStatusByJobStatus: Record<DocumentJobStatus, IngestionStatus> = {
+  uploaded: 'Uploaded',
+  processing: 'Processing',
+  completed: 'Indexed',
+  failed: 'Failed',
 }
 
 export function Dashboard() {
@@ -32,6 +44,20 @@ export function Dashboard() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [documentError, setDocumentError] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const isIndexing = documents.some(
+    (document) => document.ingestion_status === 'Processing',
+  )
+  const processingDocumentIds = documents
+    .filter((document) => document.ingestion_status === 'Processing')
+    .map((document) => document.id)
+    .sort()
+    .join(',')
+  const indexingDocument = documents.find(
+    (document) => document.ingestion_status === 'Processing',
+  )
+  const activeDocumentFilename = isUploading
+    ? uploadingFilename
+    : indexingDocument?.filename ?? null
 
   const refreshDocuments = useCallback(async () => {
     const result = await getDocuments()
@@ -61,6 +87,57 @@ export function Dashboard() {
       active = false
     }
   }, [])
+
+  useEffect(() => {
+    if (!processingDocumentIds) return
+
+    const documentIds = processingDocumentIds.split(',')
+    let active = true
+    let timeoutId: number | undefined
+
+    async function pollDocumentStatuses() {
+      try {
+        const statuses = await Promise.all(
+          documentIds.map(async (documentId) => [
+            documentId,
+            await getDocumentStatus(documentId),
+          ] as const),
+        )
+        if (!active) return
+
+        const statusesById = new Map(statuses)
+        setDocuments((currentDocuments) =>
+          currentDocuments.map((document) => {
+            const job = statusesById.get(document.id)
+            if (!job) return document
+            return {
+              ...document,
+              ingestion_status: ingestionStatusByJobStatus[job.status],
+              processing_stage: job.stage,
+              processing_error: job.error,
+            }
+          }),
+        )
+      } catch (error: unknown) {
+        if (active) setDocumentError(getDocumentErrorMessage(error))
+      } finally {
+        if (active) {
+          timeoutId = window.setTimeout(() => {
+            void pollDocumentStatuses()
+          }, 1500)
+        }
+      }
+    }
+
+    timeoutId = window.setTimeout(() => {
+      void pollDocumentStatuses()
+    }, 1000)
+
+    return () => {
+      active = false
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId)
+    }
+  }, [processingDocumentIds])
 
   async function handleSend() {
     const message = draft.trim()
@@ -98,7 +175,7 @@ export function Dashboard() {
   }
 
   async function handleUpload(file: File): Promise<boolean> {
-    if (isUploading) return false
+    if (isUploading || isIndexing) return false
 
     const extension = file.name.split('.').pop()?.toLowerCase()
     if (!extension || !['pdf', 'docx', 'txt'].includes(extension)) {
@@ -111,12 +188,33 @@ export function Dashboard() {
     setUploadProgress(0)
     setIsUploading(true)
     try {
-      await uploadDocument(file, setUploadProgress)
+      const uploaded = await uploadDocument(file, setUploadProgress)
+      setDocuments((currentDocuments) => [
+        {
+          id: uploaded.document_id,
+          filename: file.name,
+          size: file.size,
+          uploaded_at: new Date().toISOString(),
+          ingestion_status: ingestionStatusByJobStatus[uploaded.status],
+          indexed_chunks: 0,
+          processing_stage: uploaded.stage,
+          processing_error: uploaded.error,
+        },
+        ...currentDocuments.filter(
+          (document) => document.id !== uploaded.document_id,
+        ),
+      ])
       try {
         await refreshDocuments()
       } catch (error: unknown) {
         setDocumentError(
-          `Upload completed, but the document list could not be refreshed: ${getDocumentErrorMessage(error)}`,
+          `The uploaded document status could not be refreshed: ${getDocumentErrorMessage(error)}`,
+        )
+      }
+      if (uploaded.status === 'failed') {
+        const stage = uploaded.stage ? ` at ${uploaded.stage}` : ''
+        setDocumentError(
+          `Indexing failed${stage}: ${uploaded.error ?? 'Check backend logs.'}`,
         )
       }
       return true
@@ -201,8 +299,9 @@ export function Dashboard() {
           documents={documents}
           isLoading={isDocumentsLoading}
           isUploading={isUploading}
+          isIndexing={isIndexing}
           uploadProgress={uploadProgress}
-          uploadingFilename={uploadingFilename}
+          uploadingFilename={activeDocumentFilename}
           deletingId={deletingId}
           onUpload={handleUpload}
           onDelete={handleDelete}
@@ -226,8 +325,9 @@ export function Dashboard() {
             value={draft}
             isLoading={isChatLoading}
             isUploading={isUploading}
+            isIndexing={isIndexing}
             uploadProgress={uploadProgress}
-            uploadingFilename={uploadingFilename}
+            uploadingFilename={activeDocumentFilename}
             onChange={setDraft}
             onSubmit={handleSend}
             onAttach={(file) => void handleUpload(file)}

@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 
 interface UploadPanelProps {
   isUploading: boolean
+  isIndexing: boolean
   uploadProgress: number
   uploadingFilename: string | null
   onUpload: (file: File) => Promise<boolean>
@@ -12,6 +13,7 @@ const ALLOWED_EXTENSIONS = new Set(['pdf', 'docx', 'txt'])
 
 export function UploadPanel({
   isUploading,
+  isIndexing,
   uploadProgress,
   uploadingFilename,
   onUpload,
@@ -85,7 +87,7 @@ export function UploadPanel({
           className="sr-only"
           type="file"
           accept={ACCEPTED_TYPES}
-          disabled={isUploading}
+          disabled={isUploading || isIndexing}
           onChange={(event) => chooseFile(event.target.files?.[0])}
         />
         <span className="upload-drop-icon" aria-hidden="true">
@@ -113,27 +115,29 @@ export function UploadPanel({
       <button
         className="sidebar-upload-button"
         type="button"
-        disabled={!selectedFile || isUploading}
+        disabled={!selectedFile || isUploading || isIndexing}
         onClick={submitUpload}
       >
-        {isUploading ? 'Uploading…' : 'Upload document'}
+        {isIndexing ? 'Indexing…' : isUploading ? 'Uploading…' : 'Upload document'}
       </button>
 
-      {isUploading && uploadingFilename && (
+      {(isUploading || isIndexing) && uploadingFilename && (
         <div className="sidebar-upload-progress" role="status" aria-live="polite">
           <div className="upload-progress-label">
-            <span title={uploadingFilename}>{uploadingFilename}</span>
-            <span>{uploadProgress}%</span>
+            <span title={uploadingFilename}>
+              {isIndexing ? `Indexing ${uploadingFilename}` : uploadingFilename}
+            </span>
+            <span>{isIndexing ? 'Local model' : `${uploadProgress}%`}</span>
           </div>
           <div
-            className="upload-progress-track"
+            className={`upload-progress-track ${isIndexing ? 'upload-progress-track--indeterminate' : ''}`}
             role="progressbar"
-            aria-label="Upload progress"
+            aria-label={isIndexing ? 'Document indexing progress' : 'Upload progress'}
             aria-valuemin={0}
             aria-valuemax={100}
-            aria-valuenow={uploadProgress}
+            aria-valuenow={isIndexing ? undefined : uploadProgress}
           >
-            <span style={{ width: `${uploadProgress}%` }} />
+            <span style={isIndexing ? undefined : { width: `${uploadProgress}%` }} />
           </div>
         </div>
       )}

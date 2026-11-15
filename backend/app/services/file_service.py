@@ -7,7 +7,12 @@ from uuid import UUID, uuid4
 from fastapi import UploadFile
 from pydantic import ValidationError
 
-from app.models.document import Document, DocumentSummary
+from app.models.document import (
+    Document,
+    DocumentSummary,
+    IngestionStage,
+    IngestionStatus,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +53,56 @@ def _document_path(document: Document) -> Path:
     return UPLOADS_DIR / f"{document.id}{Path(document.filename).suffix.lower()}"
 
 
+def get_document(document_id: str) -> Document:
+    ensure_uploads_dir()
+    metadata_path = _metadata_path(document_id)
+    if not metadata_path.is_file():
+        raise DocumentNotFoundError("Document not found.")
+
+    document = _read_document(metadata_path)
+    if not _document_path(document).is_file():
+        logger.error("Stored document file is missing: id=%s", document.id)
+        raise DocumentNotFoundError("Document not found.")
+    return document
+
+
+def get_document_path(document: Document) -> Path:
+    return _document_path(document)
+
+
+def update_document_ingestion(
+    document_id: str,
+    ingestion_status: IngestionStatus,
+    *,
+    indexed_chunks: int | None = None,
+    processing_stage: IngestionStage | None = None,
+    processing_error: str | None = None,
+) -> Document:
+    metadata_path = _metadata_path(document_id)
+    temporary_metadata = metadata_path.with_name(f".{metadata_path.name}.tmp")
+    try:
+        document = get_document(document_id)
+        updated = document.model_copy(
+            update={
+                "ingestion_status": ingestion_status,
+                "indexed_chunks": (
+                    document.indexed_chunks
+                    if indexed_chunks is None
+                    else indexed_chunks
+                ),
+                "processing_stage": processing_stage,
+                "processing_error": processing_error,
+            }
+        )
+        temporary_metadata.write_text(updated.model_dump_json(), encoding="utf-8")
+        os.replace(temporary_metadata, metadata_path)
+        return updated
+    except (OSError, ValidationError, ValueError) as exc:
+        temporary_metadata.unlink(missing_ok=True)
+        logger.exception("Could not update ingestion status: id=%s", document_id)
+        raise DocumentStorageError("Document status could not be updated.") from exc
+
+
 def _read_document(metadata_path: Path) -> Document:
     try:
         document = Document.model_validate_json(metadata_path.read_text(encoding="utf-8"))
@@ -63,6 +118,7 @@ def _read_document(metadata_path: Path) -> Document:
 
 def save_document(upload: UploadFile) -> Document:
     original_filename = (upload.filename or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    logger.info("Upload started filename=%s", original_filename or "<unnamed>")
     extension = Path(original_filename).suffix.lower()
     if not original_filename or not Path(original_filename).stem.strip():
         raise InvalidDocumentError("A filename is required.")
@@ -106,7 +162,7 @@ def save_document(upload: UploadFile) -> Document:
         raise DocumentStorageError("The document could not be stored.") from exc
 
     logger.info(
-        "Stored document id=%s filename=%s size=%d",
+        "File saved id=%s filename=%s size=%d",
         result.id,
         result.filename,
         result.size,
@@ -129,6 +185,10 @@ def list_documents() -> list[DocumentSummary]:
                     filename=document.filename,
                     size=document.size,
                     uploaded_at=document.uploaded_at,
+                    ingestion_status=document.ingestion_status,
+                    indexed_chunks=document.indexed_chunks,
+                    processing_stage=document.processing_stage,
+                    processing_error=document.processing_error,
                 )
             )
     except OSError as exc:
@@ -146,15 +206,37 @@ def delete_document(document_id: str) -> None:
 
     stored_document = _read_document(metadata_path)
     document_path = _document_path(stored_document)
-    try:
-        document_path.unlink()
-        metadata_path.unlink()
-    except FileNotFoundError as exc:
-        logger.error("Stored document file is missing: id=%s", stored_document.id)
-        raise DocumentNotFoundError("Document not found.") from exc
-    except OSError as exc:
-        logger.exception("Could not delete document: id=%s", stored_document.id)
-        raise DocumentStorageError("The document could not be deleted.") from exc
+    from app.services.rag_service import (
+        VectorStoreError,
+        delete_document_vectors,
+        document_index_lock,
+    )
+
+    with document_index_lock():
+        if (
+            stored_document.indexed_chunks > 0
+            or stored_document.ingestion_status != "Uploaded"
+        ):
+            try:
+                delete_document_vectors(stored_document.id)
+            except VectorStoreError as exc:
+                logger.exception(
+                    "Could not delete vectors before removing document: id=%s",
+                    stored_document.id,
+                )
+                raise DocumentStorageError(
+                    "Document vectors could not be deleted; the document was not removed."
+                ) from exc
+
+        try:
+            document_path.unlink()
+            metadata_path.unlink()
+        except FileNotFoundError as exc:
+            logger.error("Stored document file is missing: id=%s", stored_document.id)
+            raise DocumentNotFoundError("Document not found.") from exc
+        except OSError as exc:
+            logger.exception("Could not delete document: id=%s", stored_document.id)
+            raise DocumentStorageError("The document could not be deleted.") from exc
 
     logger.info(
         "Deleted document id=%s filename=%s",

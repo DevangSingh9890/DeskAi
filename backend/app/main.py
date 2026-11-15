@@ -8,7 +8,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import ENV_FILE, settings
 from app.routes.chat import router as chat_router
 from app.routes.knowledge_base import router as knowledge_base_router
+from app.routes.rag import router as rag_router
 from app.services.file_service import ensure_uploads_dir
+from app.services.rag_service import (
+    VectorStoreError,
+    initialize_embedding_service,
+    recover_interrupted_ingestions,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -18,6 +24,14 @@ logging.basicConfig(
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     ensure_uploads_dir()
+    recover_interrupted_ingestions()
+    try:
+        initialize_embedding_service()
+    except VectorStoreError:
+        logging.getLogger(__name__).error(
+            "Embedding model is unavailable; indexing will fail until the backend restarts."
+        )
+
     api_key = settings.GROQ_API_KEY
     print("GROQ_API_KEY loaded:", "YES" if api_key else "NO")
     print("GROQ_MODEL:", settings.GROQ_MODEL)
@@ -45,6 +59,7 @@ app.add_middleware(
 
 app.include_router(chat_router, prefix="/api")
 app.include_router(knowledge_base_router, prefix="/api/documents", tags=["documents"])
+app.include_router(rag_router, prefix="/api/knowledge-base", tags=["knowledge-base"])
 
 
 @app.get("/")

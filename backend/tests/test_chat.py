@@ -14,6 +14,7 @@ from app.main import app
 from app.services.groq_service import (
     GroqConfigurationError,
     GroqServiceError,
+    SYSTEM_PROMPT,
     _create_tls_context,
     generate_response,
 )
@@ -49,8 +50,12 @@ class ChatRouteTests(unittest.TestCase):
         output = StringIO()
 
         with redirect_stdout(output):
-            with TestClient(app):
-                pass
+            with patch("app.main.initialize_embedding_service") as initialize:
+                with patch("app.main.recover_interrupted_ingestions") as recover:
+                    with TestClient(app):
+                        pass
+        initialize.assert_called_once_with()
+        recover.assert_called_once_with()
 
         self.assertIn(
             f"GROQ_API_KEY loaded: {'YES' if settings.GROQ_API_KEY else 'NO'}",
@@ -60,18 +65,78 @@ class ChatRouteTests(unittest.TestCase):
         if settings.GROQ_API_KEY:
             self.assertNotIn(settings.GROQ_API_KEY, output.getvalue())
 
+    @patch("app.routes.chat.search_knowledge")
     @patch("app.routes.chat.generate_response", return_value="Try reconnecting.")
     def test_chat_returns_generated_response(
-        self, generate_response_mock: MagicMock
+        self, generate_response_mock: MagicMock, search_knowledge_mock: MagicMock
     ) -> None:
+        search_knowledge_mock.return_value = [
+            {
+                "content": "Restart the VPN client.",
+                "metadata": {"filename": "VPN_Guide.pdf"},
+                "score": 0.9,
+            }
+        ]
         response = self.client.post(
             "/api/chat",
             json={"message": "My VPN is not connecting"},
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"response": "Try reconnecting."})
-        generate_response_mock.assert_called_once_with("My VPN is not connecting")
+        self.assertEqual(
+            response.json(),
+            {"response": "Try reconnecting.\n\nSources: VPN_Guide.pdf"},
+        )
+        search_knowledge_mock.assert_called_once_with("My VPN is not connecting")
+        generate_response_mock.assert_called_once_with(
+            "My VPN is not connecting",
+            "Source document: VPN_Guide.pdf\nContent: Restart the VPN client.",
+        )
+
+    @patch("app.routes.chat.search_knowledge", return_value=[])
+    @patch("app.routes.chat.generate_response")
+    def test_chat_returns_fallback_without_relevant_context(
+        self, generate_response_mock: MagicMock, _search_knowledge_mock: MagicMock
+    ) -> None:
+        response = self.client.post("/api/chat", json={"message": "Help"})
+
+        self.assertEqual(
+            response.json(),
+            {
+                "response": (
+                    "I could not find this information in the knowledge base."
+                )
+            },
+        )
+        generate_response_mock.assert_not_called()
+
+    @patch(
+        "app.routes.chat.search_knowledge",
+        return_value=[
+            {
+                "content": "Some unrelated excerpt.",
+                "metadata": {"filename": "VPN_Guide.pdf"},
+                "score": 0.9,
+            }
+        ],
+    )
+    @patch(
+        "app.routes.chat.generate_response",
+        return_value="I could not find this information in the knowledge base.",
+    )
+    def test_chat_preserves_exact_fallback_when_context_does_not_answer(
+        self, _generate_response_mock: MagicMock, _search_knowledge_mock: MagicMock
+    ) -> None:
+        response = self.client.post("/api/chat", json={"message": "Help"})
+
+        self.assertEqual(
+            response.json(),
+            {
+                "response": (
+                    "I could not find this information in the knowledge base."
+                )
+            },
+        )
 
     def test_chat_rejects_empty_message(self) -> None:
         response = self.client.post("/api/chat", json={"message": "  "})
@@ -154,7 +219,10 @@ class GroqServiceTests(unittest.TestCase):
             ]
         )
 
-        response = generate_response("My VPN is not connecting")
+        response = generate_response(
+            "My VPN is not connecting",
+            "Source document: VPN_Guide.pdf\nContent: Restart the VPN client.",
+        )
 
         self.assertEqual(response, "Try reconnecting.")
         call = groq_client.chat.completions.create.call_args.kwargs
@@ -164,7 +232,17 @@ class GroqServiceTests(unittest.TestCase):
         )
         self.assertEqual(
             call["messages"],
-            [{"role": "user", "content": "My VPN is not connecting"}],
+            [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": (
+                        "Context:\nSource document: VPN_Guide.pdf\n"
+                        "Content: Restart the VPN client.\n\n"
+                        "Question:\nMy VPN is not connecting"
+                    ),
+                },
+            ],
         )
 
     @patch("app.services.groq_service._get_client")
@@ -179,7 +257,7 @@ class GroqServiceTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(GroqServiceError, "secure connection to Groq"):
-            generate_response("Help")
+            generate_response("Help", "Available context")
 
 
 if __name__ == "__main__":

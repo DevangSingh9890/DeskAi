@@ -6,6 +6,7 @@ interface SidebarKnowledgeBaseProps {
   documents: DocumentSummary[]
   isLoading: boolean
   isUploading: boolean
+  isIndexing: boolean
   uploadProgress: number
   uploadingFilename: string | null
   deletingId: string | null
@@ -19,6 +20,7 @@ export function SidebarKnowledgeBase({
   documents,
   isLoading,
   isUploading,
+  isIndexing,
   uploadProgress,
   uploadingFilename,
   deletingId,
@@ -56,6 +58,7 @@ export function SidebarKnowledgeBase({
 
       <UploadPanel
         isUploading={isUploading}
+        isIndexing={isIndexing}
         uploadProgress={uploadProgress}
         uploadingFilename={uploadingFilename}
         onUpload={onUpload}

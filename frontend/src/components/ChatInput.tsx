@@ -4,6 +4,7 @@ interface ChatInputProps {
   value: string
   isLoading: boolean
   isUploading: boolean
+  isIndexing: boolean
   uploadProgress: number
   uploadingFilename: string | null
   onChange: (value: string) => void
@@ -15,6 +16,7 @@ export function ChatInput({
   value,
   isLoading,
   isUploading,
+  isIndexing,
   uploadProgress,
   uploadingFilename,
   onChange,
@@ -41,7 +43,7 @@ export function ChatInput({
         <div className="composer-upload-progress" role="status" aria-live="polite">
           <span className="composer-upload-name" title={uploadingFilename}>
             <span className="composer-upload-spinner" aria-hidden="true" />
-            Uploading {uploadingFilename}
+            {isIndexing ? 'Indexing' : 'Uploading'} {uploadingFilename}
           </span>
           <span>{uploadProgress}%</span>
           <div className="composer-progress-track">

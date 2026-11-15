@@ -55,7 +55,7 @@ export function DocumentList({
               <div className="document-details">
                 <h3 title={document.filename}>{document.filename}</h3>
                 <div className="document-meta">
-                  <span>{formatFileSize(document.size)}</span>
+                  <span>{document.filename.split('.').pop()?.toUpperCase()} · {formatFileSize(document.size)}</span>
                   <span className="document-meta-dot" aria-hidden="true" />
                   <time dateTime={document.uploaded_at}>
                     {new Date(document.uploaded_at).toLocaleDateString(undefined, {
@@ -65,6 +65,39 @@ export function DocumentList({
                     })}
                   </time>
                 </div>
+                <div className="document-indexing-row">
+                  <span
+                    className={`document-ingestion-status document-ingestion-status--${document.ingestion_status.toLowerCase()}`}
+                  >
+                    {document.ingestion_status}
+                  </span>
+                  {document.ingestion_status === 'Indexed' && (
+                    <span>{document.indexed_chunks} chunks</span>
+                  )}
+                  {document.ingestion_status === 'Processing' && (
+                    <>
+                      {document.processing_stage && (
+                        <span>
+                          {document.processing_stage.replaceAll('_', ' ')}
+                        </span>
+                      )}
+                      <span className="document-indexing-indicator" aria-label="Indexing">
+                        <span />
+                      </span>
+                    </>
+                  )}
+                </div>
+                {document.processing_error && (
+                  <p
+                    className="document-processing-error"
+                    title={document.processing_error}
+                  >
+                    {document.processing_stage
+                      ? `Failed at ${document.processing_stage.replaceAll('_', ' ')}: `
+                      : ''}
+                    {document.processing_error}
+                  </p>
+                )}
               </div>
               <button
                 className="document-delete-button"
