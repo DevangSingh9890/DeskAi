@@ -157,13 +157,14 @@ export function Dashboard() {
     setIsChatLoading(true)
 
     try {
-      const response = await sendChatMessage(message)
+      const result = await sendChatMessage(message)
       setMessages((currentMessages) => [
         ...currentMessages,
         {
           id: crypto.randomUUID(),
           role: 'assistant',
-          content: response,
+          content: result.response,
+          classification: result.classification,
           timestamp: new Date(),
         },
       ])

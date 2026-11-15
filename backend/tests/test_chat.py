@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from app.core.config import settings
 from app.main import app
+from app.models.classification import IncidentClassification
 from app.services.groq_service import (
     GroqConfigurationError,
     GroqServiceError,
@@ -23,6 +24,21 @@ from app.services.groq_service import (
 class ChatRouteTests(unittest.TestCase):
     def setUp(self) -> None:
         self.client = TestClient(app)
+        self.classification = IncidentClassification(
+            issue="VPN connection failure",
+            category="Network",
+            subcategory="VPN",
+            priority="High",
+            impact="Single User",
+            assigned_group="Network Support",
+            confidence_score=0.95,
+        )
+        classify_patch = patch(
+            "app.routes.chat.classify_incident",
+            return_value=self.classification,
+        )
+        self.classify_mock = classify_patch.start()
+        self.addCleanup(classify_patch.stop)
 
     def test_health_check(self) -> None:
         response = self.client.get("/")
@@ -85,7 +101,10 @@ class ChatRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.json(),
-            {"response": "Try reconnecting.\n\nSources: VPN_Guide.pdf"},
+            {
+                "response": "Try reconnecting.\n\nSources: VPN_Guide.pdf",
+                "classification": self.classification.model_dump(),
+            },
         )
         search_knowledge_mock.assert_called_once_with("My VPN is not connecting")
         generate_response_mock.assert_called_once_with(
@@ -96,7 +115,7 @@ class ChatRouteTests(unittest.TestCase):
     @patch("app.routes.chat.search_knowledge", return_value=[])
     @patch("app.routes.chat.generate_response")
     def test_chat_returns_fallback_without_relevant_context(
-        self, generate_response_mock: MagicMock, _search_knowledge_mock: MagicMock
+        self, generate_response_mock: MagicMock, search_knowledge_mock: MagicMock
     ) -> None:
         response = self.client.post("/api/chat", json={"message": "Help"})
 
@@ -105,10 +124,13 @@ class ChatRouteTests(unittest.TestCase):
             {
                 "response": (
                     "I could not find this information in the knowledge base."
-                )
+                ),
+                "classification": self.classification.model_dump(),
             },
         )
         generate_response_mock.assert_not_called()
+        search_knowledge_mock.assert_called_once_with("Help")
+        self.classify_mock.assert_called_once_with("Help")
 
     @patch(
         "app.routes.chat.search_knowledge",
@@ -125,7 +147,7 @@ class ChatRouteTests(unittest.TestCase):
         return_value="I could not find this information in the knowledge base.",
     )
     def test_chat_preserves_exact_fallback_when_context_does_not_answer(
-        self, _generate_response_mock: MagicMock, _search_knowledge_mock: MagicMock
+        self, generate_response_mock: MagicMock, search_knowledge_mock: MagicMock
     ) -> None:
         response = self.client.post("/api/chat", json={"message": "Help"})
 
@@ -134,9 +156,33 @@ class ChatRouteTests(unittest.TestCase):
             {
                 "response": (
                     "I could not find this information in the knowledge base."
+                ),
+                "classification": self.classification.model_dump(),
+            },
+        )
+        search_knowledge_mock.assert_called_once_with("Help")
+        generate_response_mock.assert_called_once()
+
+    def test_classify_endpoint_returns_structured_classification(self) -> None:
+        response = self.client.post(
+            "/api/classify",
+            json={
+                "message": (
+                    "My VPN is not connecting and I have a client meeting soon."
                 )
             },
         )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), self.classification.model_dump())
+        self.classify_mock.assert_called_once_with(
+            "My VPN is not connecting and I have a client meeting soon."
+        )
+
+    def test_classify_endpoint_rejects_empty_message(self) -> None:
+        response = self.client.post("/api/classify", json={"message": " "})
+
+        self.assertEqual(response.status_code, 422)
 
     def test_chat_rejects_empty_message(self) -> None:
         response = self.client.post("/api/chat", json={"message": "  "})
@@ -148,22 +194,44 @@ class ChatRouteTests(unittest.TestCase):
         side_effect=GroqConfigurationError("Missing API key"),
     )
     def test_chat_reports_missing_configuration(
-        self, _generate_response_mock: MagicMock
+        self, generate_response_mock: MagicMock
     ) -> None:
-        response = self.client.post("/api/chat", json={"message": "Help"})
+        with patch(
+            "app.routes.chat.search_knowledge",
+            return_value=[
+                {
+                    "content": "VPN steps.",
+                    "metadata": {"filename": "VPN.pdf"},
+                    "score": 0.9,
+                }
+            ],
+        ):
+            response = self.client.post("/api/chat", json={"message": "Help"})
 
         self.assertEqual(response.status_code, 503)
+        generate_response_mock.assert_called_once()
 
     @patch(
         "app.routes.chat.generate_response",
         side_effect=GroqServiceError("Upstream request failed"),
     )
     def test_chat_reports_upstream_failure(
-        self, _generate_response_mock: MagicMock
+        self, generate_response_mock: MagicMock
     ) -> None:
-        response = self.client.post("/api/chat", json={"message": "Help"})
+        with patch(
+            "app.routes.chat.search_knowledge",
+            return_value=[
+                {
+                    "content": "VPN steps.",
+                    "metadata": {"filename": "VPN.pdf"},
+                    "score": 0.9,
+                }
+            ],
+        ):
+            response = self.client.post("/api/chat", json={"message": "Help"})
 
         self.assertEqual(response.status_code, 502)
+        generate_response_mock.assert_called_once()
 
     def test_chat_allows_frontend_cors_origin(self) -> None:
         response = self.client.options(
@@ -244,6 +312,26 @@ class GroqServiceTests(unittest.TestCase):
                 },
             ],
         )
+
+    @patch("app.services.groq_service._get_client")
+    def test_generate_json_response_uses_json_mode(
+        self, get_client_mock: MagicMock
+    ) -> None:
+        from app.services.groq_service import generate_json_response
+
+        get_client_mock.return_value.chat.completions.create.return_value = (
+            SimpleNamespace(
+                choices=[
+                    SimpleNamespace(message=SimpleNamespace(content='{"ok": true}'))
+                ]
+            )
+        )
+
+        result = generate_json_response("Return JSON.", "Classify this.")
+
+        self.assertEqual(result, '{"ok": true}')
+        call = get_client_mock.return_value.chat.completions.create.call_args.kwargs
+        self.assertEqual(call["response_format"], {"type": "json_object"})
 
     @patch("app.services.groq_service._get_client")
     def test_tls_failure_is_reported_as_groq_service_error(

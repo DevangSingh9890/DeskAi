@@ -67,18 +67,18 @@ def _get_client() -> Groq:
     return _client
 
 
-def generate_response(message: str, context: str) -> str:
+def _generate_completion(
+    messages: list[dict[str, str]], *, json_mode: bool = False
+) -> str:
+    request_options: dict[str, object] = {
+        "model": settings.GROQ_MODEL,
+        "messages": messages,
+    }
+    if json_mode:
+        request_options["response_format"] = {"type": "json_object"}
+
     try:
-        completion = _get_client().chat.completions.create(
-            model=settings.GROQ_MODEL,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": f"Context:\n{context}\n\nQuestion:\n{message}",
-                },
-            ],
-        )
+        completion = _get_client().chat.completions.create(**request_options)
     except GroqConfigurationError:
         logger.exception("Groq configuration is missing")
         raise
@@ -104,3 +104,25 @@ def generate_response(message: str, context: str) -> str:
         raise GroqServiceError("The Groq API returned an empty response.")
 
     return response.strip()
+
+
+def generate_response(message: str, context: str) -> str:
+    return _generate_completion(
+        [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": f"Context:\n{context}\n\nQuestion:\n{message}",
+            },
+        ]
+    )
+
+
+def generate_json_response(system_prompt: str, message: str) -> str:
+    return _generate_completion(
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": message},
+        ],
+        json_mode=True,
+    )

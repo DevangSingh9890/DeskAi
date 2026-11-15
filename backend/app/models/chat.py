@@ -1,5 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.classification import IncidentClassification
+
 
 class ChatRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
@@ -9,3 +11,4 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     response: str
+    classification: IncidentClassification

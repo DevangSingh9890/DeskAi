@@ -6,10 +6,10 @@ export const api = axios.create({
   timeout: 30_000,
 })
 
-export async function sendChatMessage(message: string): Promise<string> {
+export async function sendChatMessage(message: string): Promise<ChatResponse> {
   const request: ChatRequest = { message }
   const { data } = await api.post<ChatResponse>('/api/chat', request)
-  return data.response
+  return data
 }
 
 export function getChatErrorMessage(error: unknown): string {

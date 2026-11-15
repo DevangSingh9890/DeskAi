@@ -44,6 +44,34 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         <div className={`message-bubble ${isAssistant ? 'message-bubble--assistant' : 'message-bubble--user'}`}>
           {message.content}
         </div>
+        {isAssistant && message.classification && (
+          <section className="classification-card" aria-label="Incident classification">
+            <div className="classification-heading">
+              <strong>{message.classification.issue}</strong>
+              <span className={`classification-priority classification-priority--${message.classification.priority.toLowerCase()}`}>
+                {message.classification.priority}
+              </span>
+            </div>
+            <dl className="classification-details">
+              <div>
+                <dt>Category</dt>
+                <dd>{message.classification.category} / {message.classification.subcategory}</dd>
+              </div>
+              <div>
+                <dt>Impact</dt>
+                <dd>{message.classification.impact}</dd>
+              </div>
+              <div>
+                <dt>Assigned group</dt>
+                <dd>{message.classification.assigned_group}</dd>
+              </div>
+              <div>
+                <dt>Confidence</dt>
+                <dd>{Math.round(message.classification.confidence_score * 100)}%</dd>
+              </div>
+            </dl>
+          </section>
+        )}
       </div>
       {!isAssistant && (
         <div className="message-avatar message-avatar--user" aria-hidden="true">

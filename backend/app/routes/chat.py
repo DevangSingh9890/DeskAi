@@ -3,7 +3,15 @@ import logging
 from fastapi import APIRouter, HTTPException, status
 
 from app.core.config import settings
+from app.models.classification import (
+    ClassificationRequest,
+    IncidentClassification,
+)
 from app.models.chat import ChatRequest, ChatResponse
+from app.services.classification_service import (
+    ClassificationServiceError,
+    classify_incident,
+)
 from app.services.groq_service import (
     GroqConfigurationError,
     GroqServiceError,
@@ -27,6 +35,8 @@ def debug_config() -> dict[str, str | bool]:
 
 @router.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
+    classification = _classify_or_raise(request.message)
+
     try:
         results = search_knowledge(request.message)
     except VectorStoreError as exc:
@@ -37,7 +47,10 @@ def chat(request: ChatRequest) -> ChatResponse:
         ) from exc
 
     if not results:
-        return ChatResponse(response=NO_KNOWLEDGE_RESPONSE)
+        return ChatResponse(
+            response=NO_KNOWLEDGE_RESPONSE,
+            classification=classification,
+        )
 
     context = "\n\n".join(
         f"Source document: {result['metadata'].get('filename', 'Unknown')}\n"
@@ -68,4 +81,26 @@ def chat(request: ChatRequest) -> ChatResponse:
 
     if sources and response != NO_KNOWLEDGE_RESPONSE:
         response = f"{response}\n\nSources: {', '.join(sources)}"
-    return ChatResponse(response=response)
+    return ChatResponse(response=response, classification=classification)
+
+
+@router.post("/classify", response_model=IncidentClassification)
+def classify(request: ClassificationRequest) -> IncidentClassification:
+    return _classify_or_raise(request.message)
+
+
+def _classify_or_raise(message: str) -> IncidentClassification:
+    try:
+        return classify_incident(message)
+    except GroqConfigurationError as exc:
+        logger.error("Groq API is not configured for incident classification: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The AI service is not configured.",
+        ) from exc
+    except (GroqServiceError, ClassificationServiceError) as exc:
+        logger.exception("Incident classification failed")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Unable to classify the incident at this time.",
+        ) from exc

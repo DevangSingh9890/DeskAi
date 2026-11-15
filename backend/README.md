@@ -95,13 +95,57 @@ Successful response:
 
 ```json
 {
-  "response": "AI generated response"
+  "response": "AI generated response",
+  "classification": {
+    "issue": "VPN connection failure",
+    "category": "Network",
+    "subcategory": "VPN",
+    "priority": "High",
+    "impact": "Single User",
+    "assigned_group": "Network Support",
+    "confidence_score": 0.95
+  }
 }
 ```
 
-An empty or whitespace-only message is rejected with HTTP 422. If the Groq API
-key is missing, the endpoint responds with HTTP 503; upstream Groq failures
-respond with HTTP 502.
+Every chat response includes the incident classification. Chat classification
+uses Groq structured JSON output validated against a Pydantic schema; the
+assistant response still uses indexed knowledge-base context. An empty or
+whitespace-only message is rejected with HTTP 422. If the Groq API key is
+missing, the endpoint responds with HTTP 503; upstream Groq failures respond
+with HTTP 502.
+
+### `POST /api/classify`
+
+Classifies an incident without generating a knowledge-base answer.
+
+Request:
+
+```json
+{
+  "message": "My VPN is not connecting and I have a client meeting in 30 minutes."
+}
+```
+
+Response:
+
+```json
+{
+  "issue": "VPN connection failure",
+  "category": "Network",
+  "subcategory": "VPN",
+  "priority": "High",
+  "impact": "Single User",
+  "assigned_group": "Network Support",
+  "confidence_score": 0.95
+}
+```
+
+The supported categories are Network, Software, Hardware, Email, Access
+Management, Security, Database, Cloud, and Collaboration Tools. Priority is
+Critical, High, Medium, or Low. Confidence is a model-estimated score from 0
+to 1, not a calibrated probability. Invalid structured output or an upstream
+failure returns HTTP 502.
 
 ### `POST /api/documents/upload`
 
