@@ -22,7 +22,10 @@ python -m pip install -r requirements.txt
 ```
 
 Copy `.env.example` to `.env` and set `GROQ_API_KEY`. The default Groq model is
-`openai/gpt-oss-20b`. RAG settings are:
+`openai/gpt-oss-20b`. Set `APP_ENV=development` locally to include agent
+validation details in failed chat responses; the default is `production`, which
+keeps client errors generic while full exceptions are logged server-side. RAG
+settings are:
 
 | Variable | Default | Description |
 | --- | --- | --- |
@@ -34,6 +37,7 @@ Copy `.env.example` to `.env` and set `GROQ_API_KEY`. The default Groq model is
 | `TRANSFORMERS_CACHE` | Hugging Face default | Optional Transformers cache directory |
 | `SENTENCE_TRANSFORMERS_HOME` | Sentence Transformers default | Optional Sentence Transformers cache directory |
 | `ADMIN_API_KEY` | unset | Required to enable the protected model warm-up endpoint |
+| `APP_ENV` | `production` | Use `development` for detailed agent validation errors |
 
 No OpenAI embedding key or Hugging Face key is used. The API starts without
 loading the embedding model; it is loaded once per backend process on the first
@@ -212,8 +216,10 @@ with HTTP 502.
 ### `POST /api/agent/chat`
 
 Runs the LangGraph service-desk workflow: supervisor routing, incident
-classification, Chroma knowledge retrieval, and context-grounded
-troubleshooting. The supervisor can skip agents that are not needed.
+classification, Chroma knowledge retrieval, context-grounded troubleshooting,
+and ticket recommendation. The ticket agent can check status, find similar
+incidents, recommend a ticket, or take no action. It never creates a ticket
+without a separate approval request.
 
 Request:
 
@@ -246,6 +252,39 @@ structured troubleshooting, and a formatted response:
   "response": "Likely cause: ...\nTroubleshooting steps:\n..."
 }
 ```
+
+### Ticket APIs
+
+Tickets are held in a thread-safe in-memory repository; they are cleared when
+the backend process restarts. The repository protocol isolates storage from
+the API and supports a future database-backed implementation.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/tickets` | Create a ticket from explicit ticket details |
+| `GET` | `/api/tickets` | List tickets |
+| `GET` | `/api/tickets/{ticket_id}` | Retrieve ticket details |
+| `PUT` | `/api/tickets/{ticket_id}` | Update ticket fields, including assignment and resolution |
+| `GET` | `/api/tickets/status/{ticket_id}` | Retrieve status and assigned group |
+| `GET` | `/api/tickets/similar?q=...` | Search historical tickets |
+| `POST` | `/api/tickets/approve` | Approve or reject a pending AI ticket recommendation |
+
+When the ticket agent recommends an incident, `/api/agent/chat` returns an
+`approval_id`; no ticket is created at that stage. Approve with the original
+user message and approval ID:
+
+```json
+{
+  "approved": true,
+  "message": "My VPN is not connecting and a meeting starts soon.",
+  "approval_id": "returned-by-agent-chat"
+}
+```
+
+The approval ID is optional when the original message uniquely identifies a
+pending recommendation. Approval returns the created ticket, including its
+`ticket_id`, `status`, and `assigned_group`. Rejected or expired recommendations
+cannot create tickets.
 
 ### `POST /api/classify`
 

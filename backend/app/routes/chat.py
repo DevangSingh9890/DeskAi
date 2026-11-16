@@ -30,6 +30,7 @@ from app.services.rag_service import (
     search_knowledge,
     warm_up_embedding_service,
 )
+from app.services.ticket_service import TicketServiceError
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -168,15 +169,22 @@ def agent_chat(request: ChatRequest) -> AgentChatResponse:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="The knowledge base is unavailable.",
         ) from exc
-    except (
-        ClassificationAgentError,
-        GroqServiceError,
-        ValidationError,
-    ) as exc:
+    except TicketServiceError as exc:
+        logger.exception("Agent ticket tools are unavailable")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The ticket service is unavailable.",
+        ) from exc
+    except (ClassificationAgentError, GroqServiceError, ValidationError) as exc:
         logger.exception("Service-desk agent graph failed")
+        detail = (
+            f"Service-desk agent workflow failed: {exc}"
+            if settings.APP_ENV == "development"
+            else "The service-desk agent workflow failed."
+        )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="The service-desk agent workflow failed.",
+            detail=detail,
         ) from exc
 
     return AgentChatResponse(
@@ -184,6 +192,9 @@ def agent_chat(request: ChatRequest) -> AgentChatResponse:
         knowledge_sources=state.get("knowledge", {}).get("sources", []),
         troubleshooting=state.get("troubleshooting", {}),
         response=state.get("final_response", {}).get("response", ""),
+        ticket_recommendation=state.get("ticket_recommendation"),
+        similar_tickets=state.get("similar_tickets", []),
+        ticket_status=state.get("ticket_status"),
     )
 
 

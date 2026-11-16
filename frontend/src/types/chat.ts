@@ -1,3 +1,11 @@
+import type {
+  SimilarTicket,
+  Ticket,
+  TicketApprovalState,
+  TicketRecommendation,
+  TicketStatusInfo,
+} from './ticket'
+
 export type MessageRole = 'assistant' | 'user'
 
 export interface ChatMessage {
@@ -8,6 +16,10 @@ export interface ChatMessage {
   classification?: IncidentClassification
   agentResponse?: AgentChatResponse
   workflowDurationMs?: number
+  originalUserMessage?: string
+  ticketApprovalState?: TicketApprovalState
+  ticketApprovalError?: string
+  createdTicket?: Ticket
 }
 
 export interface ChatRequest {
@@ -65,4 +77,7 @@ export interface AgentChatResponse {
   recommended_action?: string | null
   follow_up_suggestions?: string[] | null
   summary?: string | null
+  ticket_recommendation?: TicketRecommendation | null
+  similar_tickets?: SimilarTicket[] | null
+  ticket_status?: TicketStatusInfo | null
 }

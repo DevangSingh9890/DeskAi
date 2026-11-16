@@ -3,6 +3,7 @@ const agents = [
   'Classification Agent',
   'Knowledge Agent',
   'Troubleshooting Agent',
+  'Ticket Agent',
 ]
 
 interface AgentWorkflowCardProps {

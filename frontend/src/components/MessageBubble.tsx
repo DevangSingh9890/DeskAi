@@ -1,4 +1,5 @@
 import type { ChatMessage } from '../types/chat'
+import { TicketRecommendationCard } from './TicketRecommendationCard'
 import { AgentWorkflowCard } from './AgentWorkflowCard'
 import { ClassificationCard } from './ClassificationCard'
 import { KnowledgeSourcesCard } from './KnowledgeSourcesCard'
@@ -7,6 +8,7 @@ import { TroubleshootingCard } from './TroubleshootingCard'
 
 interface MessageBubbleProps {
   message: ChatMessage
+  onTicketDecision: (messageId: string, approved: boolean) => void
 }
 
 function AssistantMark() {
@@ -18,7 +20,7 @@ function AssistantMark() {
   )
 }
 
-export function MessageBubble({ message }: MessageBubbleProps) {
+export function MessageBubble({ message, onTicketDecision }: MessageBubbleProps) {
   const isAssistant = message.role === 'assistant'
 
   return (
@@ -73,6 +75,17 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                   message.agentResponse.troubleshooting?.follow_up_suggestions
                 }
                 summary={message.agentResponse.summary ?? message.agentResponse.response ?? message.content}
+              />
+              <TicketRecommendationCard
+                recommendation={message.agentResponse.ticket_recommendation}
+                classification={message.agentResponse.classification}
+                status={message.agentResponse.ticket_status}
+                similarTickets={message.agentResponse.similar_tickets}
+                approvalState={message.ticketApprovalState}
+                approvalError={message.ticketApprovalError}
+                createdTicket={message.createdTicket}
+                onApprove={() => onTicketDecision(message.id, true)}
+                onReject={() => onTicketDecision(message.id, false)}
               />
             </div>
           </>

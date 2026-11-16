@@ -23,7 +23,9 @@ strings), escalation_recommendation (string).
 class TroubleshootingResult(BaseModel):
     likely_cause: str
     troubleshooting_steps: list[str]
-    escalation_recommendation: str
+    escalation_recommendation: str = (
+        "Contact the service desk if these steps do not resolve the issue."
+    )
 
 
 def _format_response(

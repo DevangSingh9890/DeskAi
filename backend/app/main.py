@@ -9,6 +9,7 @@ from app.core.config import ENV_FILE, settings
 from app.routes.chat import router as chat_router
 from app.routes.knowledge_base import router as knowledge_base_router
 from app.routes.rag import router as rag_router
+from app.routes.tickets import router as tickets_router
 from app.services.file_service import ensure_uploads_dir
 from app.services.rag_service import (
     is_embedding_model_loaded,
@@ -52,13 +53,14 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.CORS_ORIGINS),
     allow_credentials=True,
-    allow_methods=["GET", "POST", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Content-Type", "Authorization"],
 )
 
 app.include_router(chat_router, prefix="/api")
 app.include_router(knowledge_base_router, prefix="/api/documents", tags=["documents"])
 app.include_router(rag_router, prefix="/api/knowledge-base", tags=["knowledge-base"])
+app.include_router(tickets_router, prefix="/api", tags=["tickets"])
 
 
 @app.get("/")

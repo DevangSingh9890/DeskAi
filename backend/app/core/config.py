@@ -20,6 +20,7 @@ def _read_setting(name: str, default: str = "") -> str:
 
 @dataclass(frozen=True)
 class Settings:
+    APP_ENV: str
     GROQ_API_KEY: str
     GROQ_MODEL: str
     GROQ_CA_BUNDLE: str
@@ -40,6 +41,7 @@ if not _configured_chroma_directory.is_absolute():
     _configured_chroma_directory = BACKEND_DIR / _configured_chroma_directory
 
 settings = Settings(
+    APP_ENV=_read_setting("APP_ENV", "production").lower(),
     GROQ_API_KEY=_read_setting("GROQ_API_KEY"),
     GROQ_MODEL=_read_setting("GROQ_MODEL", "openai/gpt-oss-20b"),
     GROQ_CA_BUNDLE=_read_setting("GROQ_CA_BUNDLE"),

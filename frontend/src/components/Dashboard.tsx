@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ChatContainer } from './ChatContainer'
 import { ChatInput } from './ChatInput'
 import { SidebarKnowledgeBase } from './SidebarKnowledgeBase'
+import { TicketsDashboard } from '../pages/TicketsDashboard'
 import {
   deleteDocument,
   getDocumentErrorMessage,
@@ -21,6 +22,11 @@ import {
 } from '../services/api'
 import type { PerformanceStatus } from '../services/api'
 import type { ChatMessage } from '../types/chat'
+import type { TicketCreateRequest, TicketPriority } from '../types/ticket'
+import {
+  approveTicket,
+  getTicketErrorMessage,
+} from '../services/ticketService'
 
 const greeting: ChatMessage = {
   id: 'welcome',
@@ -36,7 +42,42 @@ const ingestionStatusByJobStatus: Record<DocumentJobStatus, IngestionStatus> = {
   failed: 'Failed',
 }
 
+function isTicketPriority(value: string | null | undefined): value is TicketPriority {
+  return (
+    value === 'Critical' ||
+    value === 'High' ||
+    value === 'Medium' ||
+    value === 'Low'
+  )
+}
+
+function getTicketDetails(message: ChatMessage): TicketCreateRequest | undefined {
+  const classification = message.agentResponse?.classification
+  const description = message.originalUserMessage ?? message.content
+  if (
+    !classification?.issue ||
+    !classification.category ||
+    !classification.subcategory ||
+    !classification.assigned_group ||
+    !isTicketPriority(classification.priority)
+  ) {
+    return undefined
+  }
+
+  return {
+    title: classification.issue,
+    description,
+    priority: classification.priority,
+    category: classification.category,
+    subcategory: classification.subcategory,
+    assigned_group: classification.assigned_group,
+    created_by: 'user',
+  }
+}
+
 export function Dashboard() {
+  const [activeView, setActiveView] = useState<'chat' | 'tickets'>('chat')
+  const [ticketsRefreshKey, setTicketsRefreshKey] = useState(0)
   const [messages, setMessages] = useState<ChatMessage[]>([greeting])
   const [draft, setDraft] = useState('')
   const [isChatLoading, setIsChatLoading] = useState(false)
@@ -220,6 +261,7 @@ export function Dashboard() {
           content: result.response ?? '',
           agentResponse: result,
           workflowDurationMs: performance.now() - startedAt,
+          originalUserMessage: message,
           timestamp: completedAt,
         },
       ])
@@ -229,6 +271,73 @@ export function Dashboard() {
       window.clearInterval(progressTimer)
       setAgentProgress(null)
       setIsChatLoading(false)
+    }
+  }
+
+  async function handleTicketDecision(
+    messageId: string,
+    approved: boolean,
+  ): Promise<void> {
+    const message = messages.find((candidate) => candidate.id === messageId)
+    if (!message) return
+
+    const approvalId = message.agentResponse?.ticket_recommendation?.approval_id
+    const originalMessage = message.originalUserMessage ?? message.content
+    const ticketDetails = getTicketDetails(message)
+    setMessages((currentMessages) =>
+      currentMessages.map((candidate) =>
+        candidate.id === messageId
+          ? {
+              ...candidate,
+              ticketApprovalState: approved ? 'approving' : 'rejecting',
+              ticketApprovalError: undefined,
+            }
+          : candidate,
+      ),
+    )
+
+    try {
+      const result = await approveTicket({
+        approved,
+        message: originalMessage,
+        ...(approvalId ? { approval_id: approvalId } : {}),
+        ...(ticketDetails ? { ticket_details: ticketDetails } : {}),
+      })
+
+      if (approved && !result.ticket) {
+        throw new Error('The ticket service did not return the created ticket.')
+      }
+
+      setMessages((currentMessages) =>
+        currentMessages.map((candidate) =>
+          candidate.id === messageId
+            ? {
+                ...candidate,
+                ticketApprovalState: approved ? 'approved' : 'rejected',
+                createdTicket: result.ticket ?? undefined,
+                ticketApprovalError: undefined,
+              }
+            : candidate,
+        ),
+      )
+      if (result.ticket) {
+        setTicketsRefreshKey((currentKey) => currentKey + 1)
+      }
+    } catch (error: unknown) {
+      setMessages((currentMessages) =>
+        currentMessages.map((candidate) =>
+          candidate.id === messageId
+            ? {
+                ...candidate,
+                ticketApprovalState: 'failed',
+                ticketApprovalError:
+                  error instanceof Error && !('response' in error)
+                    ? error.message
+                    : getTicketErrorMessage(error),
+              }
+            : candidate,
+        ),
+      )
     }
   }
 
@@ -337,6 +446,24 @@ export function Dashboard() {
           </div>
         </div>
         <div className="dashboard-header-actions">
+          <nav className="dashboard-view-tabs" aria-label="Workspace sections">
+            <button
+              className={activeView === 'chat' ? 'dashboard-view-tab dashboard-view-tab--active' : 'dashboard-view-tab'}
+              type="button"
+              aria-current={activeView === 'chat' ? 'page' : undefined}
+              onClick={() => setActiveView('chat')}
+            >
+              Assistant
+            </button>
+            <button
+              className={activeView === 'tickets' ? 'dashboard-view-tab dashboard-view-tab--active' : 'dashboard-view-tab'}
+              type="button"
+              aria-current={activeView === 'tickets' ? 'page' : undefined}
+              onClick={() => setActiveView('tickets')}
+            >
+              Tickets
+            </button>
+          </nav>
           <span
             className={`header-status ${
               performanceStatus?.warming
@@ -359,18 +486,20 @@ export function Dashboard() {
                   ? '🟢 RAG Engine Ready'
                   : 'RAG Engine Checking'}
           </span>
-          <button
-            className="sidebar-toggle"
-            type="button"
-            onClick={() => setSidebarOpen((open) => !open)}
-            aria-expanded={sidebarOpen}
-            aria-label={sidebarOpen ? 'Collapse knowledge base panel' : 'Open knowledge base panel'}
-          >
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-              <path d="M3 4.5h14v11H3zM8 4.5v11" />
-            </svg>
-            <span>Knowledge base</span>
-          </button>
+          {activeView === 'chat' && (
+            <button
+              className="sidebar-toggle"
+              type="button"
+              onClick={() => setSidebarOpen((open) => !open)}
+              aria-expanded={sidebarOpen}
+              aria-label={sidebarOpen ? 'Collapse knowledge base panel' : 'Open knowledge base panel'}
+            >
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M3 4.5h14v11H3zM8 4.5v11" />
+              </svg>
+              <span>Knowledge base</span>
+            </button>
+          )}
         </div>
       </header>
 
@@ -388,57 +517,66 @@ export function Dashboard() {
         </div>
       )}
 
-      <div
-        className={`dashboard-workspace ${sidebarOpen ? 'dashboard-workspace--sidebar-open' : 'dashboard-workspace--sidebar-collapsed'}`}
-      >
-        <SidebarKnowledgeBase
-          mobile
-          documents={documents}
-          isLoading={isDocumentsLoading}
-          isUploading={isUploading}
-          isIndexing={isIndexing}
-          uploadProgress={uploadProgress}
-          uploadingFilename={activeDocumentFilename}
-          deletingId={deletingId}
-          onUpload={handleUpload}
-          onDelete={handleDelete}
-          onClose={() => setSidebarOpen(false)}
-        />
-        <button
-          className={`mobile-drawer-backdrop ${sidebarOpen ? 'mobile-drawer-backdrop--visible' : ''}`}
-          type="button"
-          onClick={() => setSidebarOpen(false)}
-          aria-label="Close knowledge base panel"
-          tabIndex={sidebarOpen ? 0 : -1}
-        />
-        <main className="chat-workspace">
-          <ChatContainer
-            messages={messages}
-            isLoading={isChatLoading}
-            agentProgress={agentProgress}
-            error={chatError}
-            onSelectSuggestion={setDraft}
-          />
-          <ChatInput
-            value={draft}
-            isLoading={isChatLoading}
+      {activeView === 'chat' ? (
+        <div
+          className={`dashboard-workspace ${sidebarOpen ? 'dashboard-workspace--sidebar-open' : 'dashboard-workspace--sidebar-collapsed'}`}
+        >
+          <SidebarKnowledgeBase
+            mobile
+            documents={documents}
+            isLoading={isDocumentsLoading}
             isUploading={isUploading}
             isIndexing={isIndexing}
             uploadProgress={uploadProgress}
             uploadingFilename={activeDocumentFilename}
-            onChange={setDraft}
-            onSubmit={handleSend}
-            onAttach={(file) => void handleUpload(file)}
+            deletingId={deletingId}
+            onUpload={handleUpload}
+            onDelete={handleDelete}
+            onClose={() => setSidebarOpen(false)}
           />
-          <p className="composer-privacy">
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <rect x="3.5" y="7" width="9" height="7" rx="1.5" />
-              <path d="M5.5 7V5a2 2 0 0 1 4 0v2" />
-            </svg>
-            Your conversation and documents stay within your workspace.
-          </p>
+          <button
+            className={`mobile-drawer-backdrop ${sidebarOpen ? 'mobile-drawer-backdrop--visible' : ''}`}
+            type="button"
+            onClick={() => setSidebarOpen(false)}
+            aria-label="Close knowledge base panel"
+            tabIndex={sidebarOpen ? 0 : -1}
+          />
+          <main className="chat-workspace">
+            <ChatContainer
+              messages={messages}
+              isLoading={isChatLoading}
+              agentProgress={agentProgress}
+              error={chatError}
+              onSelectSuggestion={setDraft}
+              onTicketDecision={(messageId, approved) =>
+                void handleTicketDecision(messageId, approved)
+              }
+            />
+            <ChatInput
+              value={draft}
+              isLoading={isChatLoading}
+              isUploading={isUploading}
+              isIndexing={isIndexing}
+              uploadProgress={uploadProgress}
+              uploadingFilename={activeDocumentFilename}
+              onChange={setDraft}
+              onSubmit={handleSend}
+              onAttach={(file) => void handleUpload(file)}
+            />
+            <p className="composer-privacy">
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <rect x="3.5" y="7" width="9" height="7" rx="1.5" />
+                <path d="M5.5 7V5a2 2 0 0 1 4 0v2" />
+              </svg>
+              Your conversation and documents stay within your workspace.
+            </p>
+          </main>
+        </div>
+      ) : (
+        <main className="ticket-page-shell">
+          <TicketsDashboard refreshKey={ticketsRefreshKey} />
         </main>
-      </div>
+      )}
     </div>
   )
 }

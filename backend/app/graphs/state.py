@@ -9,4 +9,7 @@ class ServiceDeskState(TypedDict, total=False):
     classification: dict[str, Any]
     knowledge: dict[str, Any]
     troubleshooting: dict[str, Any]
+    ticket_recommendation: dict[str, Any]
+    similar_tickets: list[dict[str, Any]]
+    ticket_status: dict[str, Any] | None
     final_response: dict[str, Any]

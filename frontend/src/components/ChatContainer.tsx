@@ -9,6 +9,7 @@ interface ChatContainerProps {
   agentProgress: number | null
   error: string | null
   onSelectSuggestion: (value: string) => void
+  onTicketDecision: (messageId: string, approved: boolean) => void
 }
 
 const suggestions = [
@@ -42,6 +43,7 @@ export function ChatContainer({
   agentProgress,
   error,
   onSelectSuggestion,
+  onTicketDecision,
 }: ChatContainerProps) {
   const endOfMessagesRef = useRef<HTMLDivElement>(null)
 
@@ -80,7 +82,11 @@ export function ChatContainer({
         aria-relevant="additions"
       >
         {messages.map((message) => (
-          <MessageBubble key={message.id} message={message} />
+          <MessageBubble
+            key={message.id}
+            message={message}
+            onTicketDecision={onTicketDecision}
+          />
         ))}
 
         {messages.length === 1 && !isLoading && (

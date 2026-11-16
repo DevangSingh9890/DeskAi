@@ -1,6 +1,8 @@
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from app.models.ticket import SimilarTicket, TicketRecommendation, TicketStatusResponse
 
 
 class AgentChatResponse(BaseModel):
@@ -8,3 +10,6 @@ class AgentChatResponse(BaseModel):
     knowledge_sources: list[str]
     troubleshooting: dict[str, Any]
     response: str
+    ticket_recommendation: TicketRecommendation | None = None
+    similar_tickets: list[SimilarTicket] = Field(default_factory=list)
+    ticket_status: TicketStatusResponse | None = None
