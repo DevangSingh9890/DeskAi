@@ -46,6 +46,11 @@ class DocumentJobResponse(BaseModel):
     error: str | None = None
 
 
+class WarmingResponse(BaseModel):
+    status: Literal["warming"] = "warming"
+    message: str
+
+
 def to_document_job_response(document: Document) -> DocumentJobResponse:
     status_by_ingestion_status: dict[IngestionStatus, JobStatus] = {
         "Uploaded": "uploaded",

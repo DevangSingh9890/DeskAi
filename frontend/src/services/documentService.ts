@@ -31,7 +31,11 @@ export type IngestionStage =
   | 'embedding_generation'
   | 'chroma_insert'
   | 'indexing'
-export type DocumentJobStatus = 'uploaded' | 'processing' | 'completed' | 'failed'
+export type DocumentJobStatus =
+  | 'uploaded'
+  | 'processing'
+  | 'completed'
+  | 'failed'
 
 export interface DocumentJobResponse {
   document_id: string
@@ -39,6 +43,13 @@ export interface DocumentJobResponse {
   stage: IngestionStage | null
   error: string | null
 }
+
+export interface WarmingResponse {
+  status: 'warming'
+  message: string
+}
+
+export type UploadResponse = DocumentJobResponse | WarmingResponse
 
 export async function getDocuments(): Promise<DocumentSummary[]> {
   const { data } = await api.get<DocumentSummary[]>('/api/documents')
@@ -48,11 +59,11 @@ export async function getDocuments(): Promise<DocumentSummary[]> {
 export async function uploadDocument(
   file: File,
   onProgress: (progress: number) => void,
-): Promise<DocumentJobResponse> {
+): Promise<UploadResponse> {
   const formData = new FormData()
   formData.append('file', file)
 
-  const { data } = await api.post<DocumentJobResponse>(
+  const { data } = await api.post<UploadResponse>(
     '/api/documents/upload',
     formData,
     {
@@ -67,8 +78,10 @@ export async function uploadDocument(
   return data
 }
 
-export async function ingestDocument(documentId: string): Promise<DocumentJobResponse> {
-  const { data } = await api.post<DocumentJobResponse>(
+export async function ingestDocument(
+  documentId: string,
+): Promise<DocumentJobResponse | WarmingResponse> {
+  const { data } = await api.post<DocumentJobResponse | WarmingResponse>(
     `/api/knowledge-base/${encodeURIComponent(documentId)}/ingest`,
   )
   return data

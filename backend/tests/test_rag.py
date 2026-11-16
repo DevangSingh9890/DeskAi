@@ -1,4 +1,9 @@
+from concurrent.futures import ThreadPoolExecutor
+import os
 import tempfile
+from threading import Event
+from time import perf_counter
+from time import sleep
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -78,6 +83,7 @@ class RagRouteTests(unittest.TestCase):
             [0.1] * 384 for _ in texts
         ]
         self.embedding.embed_query.return_value = [0.1] * 384
+        self.real_get_embeddings = rag_service._get_embeddings
         self.store_patch = patch.object(
             rag_service, "_get_store", return_value=self.store
         )
@@ -249,6 +255,23 @@ class RagRouteTests(unittest.TestCase):
             response.json()["total_indexed_chunks"], document["indexed_chunks"]
         )
 
+    def test_health_reports_embedding_model_state_without_loading_it(self) -> None:
+        with patch.object(rag_service.EmbeddingService, "_model", None):
+            response = self.client.get("/api/health")
+
+        self.assertEqual(
+            response.json(),
+            {"backend": "ready", "embedding_model_loaded": False},
+        )
+
+        with patch.object(rag_service.EmbeddingService, "_model", object()):
+            response = self.client.get("/api/health")
+
+        self.assertEqual(
+            response.json(),
+            {"backend": "ready", "embedding_model_loaded": True},
+        )
+
     def test_stats_expose_unavailable_vector_database(self) -> None:
         with patch.object(
             rag_service,
@@ -295,15 +318,292 @@ class RagRouteTests(unittest.TestCase):
 
     def test_embedding_model_is_initialized_once(self) -> None:
         with (
-            patch.object(rag_service, "_embeddings", None),
-            patch.object(rag_service, "_embedding_initialization_error", None),
-            patch.object(rag_service, "_embedding_initialization_attempted", False),
+            patch.object(rag_service.EmbeddingService, "_instance", None),
+            patch.object(rag_service.EmbeddingService, "_model", None),
+            patch.object(rag_service.EmbeddingService, "_load_error", None),
+            patch.object(rag_service.EmbeddingService, "_load_attempted", False),
+            patch.object(
+                rag_service,
+                "_resolve_embedding_model_source",
+                return_value=("C:/cached/model", None, "cache"),
+            ),
             patch("langchain_huggingface.HuggingFaceEmbeddings") as constructor,
         ):
-            rag_service.initialize_embedding_service()
-            rag_service.initialize_embedding_service()
+            constructor.side_effect = lambda **_: (sleep(0.05), object())[1]
+            with self.assertLogs(rag_service.logger, level="INFO") as logs:
+                service = rag_service.EmbeddingService()
+                second_service = rag_service.EmbeddingService()
+                self.assertIs(service, second_service)
+                with ThreadPoolExecutor(max_workers=8) as executor:
+                    models = list(executor.map(lambda _: service.get_model(), range(8)))
 
         constructor.assert_called_once()
+        self.assertTrue(all(model is models[0] for model in models))
+        self.assertIn(
+            "Loading embedding model for first time",
+            "\n".join(logs.output),
+        )
+        self.assertIn("Embedding model loaded successfully", "\n".join(logs.output))
+        self.assertIn("Reusing existing embedding model", "\n".join(logs.output))
+        self.assertIn("Model initialization time:", "\n".join(logs.output))
+        self.assertIn("Model load time:", "\n".join(logs.output))
+
+    def test_ingestion_logs_embedding_chroma_and_total_timings(self) -> None:
+        document_id = self._upload_text()
+
+        with self.assertLogs(rag_service.logger, level="INFO") as logs:
+            response = self.client.post(
+                f"/api/knowledge-base/{document_id}/ingest?force=true"
+            )
+
+        self.assertEqual(response.status_code, 202)
+        output = "\n".join(logs.output)
+        self.assertIn("Extraction:", output)
+        self.assertIn("Chunking:", output)
+        self.assertIn("Embedding:", output)
+        self.assertIn("Chroma Insert:", output)
+        self.assertIn("Total Indexing:", output)
+
+    def test_document_upload_logs_save_time(self) -> None:
+        with self.assertLogs("app.services.file_service", level="INFO") as logs:
+            self._upload_text()
+
+        self.assertIn("Save:", "\n".join(logs.output))
+
+    def test_uploads_reuse_the_loaded_model(self) -> None:
+        with (
+            patch.object(rag_service.EmbeddingService, "_model", self.embedding),
+            patch.object(rag_service.EmbeddingService, "_load_error", None),
+            patch.object(
+                rag_service,
+                "_get_embeddings",
+                side_effect=self.real_get_embeddings,
+            ) as get_embeddings,
+            patch("langchain_huggingface.HuggingFaceEmbeddings") as constructor,
+        ):
+            self._upload_text("first.txt")
+            self._upload_text("second.txt")
+
+        constructor.assert_not_called()
+        self.assertEqual(get_embeddings.call_count, 2)
+
+    def test_embedding_model_warmup_generates_a_query_embedding(self) -> None:
+        model = MagicMock()
+        model.embed_query.return_value = [0.1] * 384
+        with (
+            patch.object(rag_service.EmbeddingService, "_model", model),
+            patch.object(
+                rag_service,
+                "_get_embeddings",
+                side_effect=self.real_get_embeddings,
+            ),
+            self.assertLogs(rag_service.logger, level="INFO") as logs,
+        ):
+            rag_service.warm_up_embedding_service()
+
+        model.embed_query.assert_called_once_with("DeskAI embedding model warm-up")
+        self.assertIn("Model warm-up embedding time:", "\n".join(logs.output))
+
+    def test_background_warmup_loads_once_and_updates_status(self) -> None:
+        constructor_entered = Event()
+        allow_constructor_to_finish = Event()
+        model = MagicMock()
+        model.embed_query.return_value = [0.1] * 384
+
+        def construct_model(**_: object) -> MagicMock:
+            constructor_entered.set()
+            allow_constructor_to_finish.wait(timeout=2)
+            return model
+
+        initial_status = {
+            "warming": False,
+            "embedding_model_loaded": False,
+            "warmup_started_at": None,
+            "warmup_completed_at": None,
+            "warmup_status": "not_started",
+            "warmup_error": None,
+        }
+        with (
+            patch.object(rag_service, "_warmup_thread_started", False),
+            patch.object(rag_service, "_warmup_thread", None),
+            patch.object(rag_service, "_warmup_state", initial_status),
+            patch.object(rag_service, "_pending_ingestions", {}),
+            patch.object(rag_service.EmbeddingService, "_instance", None),
+            patch.object(rag_service.EmbeddingService, "_model", None),
+            patch.object(rag_service.EmbeddingService, "_load_error", None),
+            patch.object(rag_service.EmbeddingService, "_load_attempted", False),
+            patch.object(
+                rag_service,
+                "_get_embeddings",
+                side_effect=self.real_get_embeddings,
+            ),
+            patch.object(
+                rag_service,
+                "_resolve_embedding_model_source",
+                return_value=("C:/cached/model", None, "cache"),
+            ),
+            patch(
+                "langchain_huggingface.HuggingFaceEmbeddings",
+                side_effect=construct_model,
+            ) as constructor,
+        ):
+            with self.assertLogs(rag_service.logger, level="INFO") as logs:
+                start = perf_counter()
+                rag_service.start_background_embedding_warmup()
+                start_duration = perf_counter() - start
+                thread = rag_service._warmup_thread
+                try:
+                    self.assertTrue(constructor_entered.wait(timeout=1))
+                    self.assertLess(start_duration, 0.5)
+                    self.assertTrue(thread.is_alive())
+                    self.assertTrue(thread.daemon)
+                    self.assertTrue(
+                        rag_service.get_embedding_warmup_status()["warming"]
+                    )
+                finally:
+                    allow_constructor_to_finish.set()
+                    thread.join(timeout=5)
+
+            constructor.assert_called_once()
+            model.embed_query.assert_called_once_with(
+                "DeskAI embedding model warm-up"
+            )
+            status = rag_service.get_embedding_warmup_status()
+            self.assertFalse(status["warming"])
+            self.assertTrue(status["embedding_model_loaded"])
+            self.assertEqual(status["warmup_status"], "ready")
+            self.assertIsNotNone(status["warmup_started_at"])
+            self.assertIsNotNone(status["warmup_completed_at"])
+            output = "\n".join(logs.output)
+            self.assertIn("Background embedding warmup started", output)
+            self.assertIn("Embedding model loaded successfully", output)
+            self.assertIn("Warmup completed", output)
+
+    def test_ingestion_is_deferred_and_drained_after_warmup(self) -> None:
+        state = {
+            "warming": True,
+            "embedding_model_loaded": False,
+            "warmup_started_at": "2026-11-16T00:00:00+00:00",
+            "warmup_completed_at": None,
+            "warmup_status": "warming",
+            "warmup_error": None,
+        }
+        pending: dict[str, bool] = {}
+        with (
+            patch.object(rag_service, "_warmup_state", state),
+            patch.object(rag_service, "_pending_ingestions", pending),
+        ):
+            rag_service.process_document_ingestion("deferred-doc", force=True)
+            self.assertEqual(pending, {"deferred-doc": True})
+
+            with patch.object(rag_service, "process_document_ingestion") as process:
+                rag_service._finish_background_embedding_warmup(success=True)
+
+        process.assert_called_once_with("deferred-doc", force=True)
+        self.assertFalse(state["warming"])
+        self.assertEqual(state["warmup_status"], "ready")
+
+    def test_model_cache_settings_are_supported(self) -> None:
+        with tempfile.TemporaryDirectory() as cache_root:
+            variables = (
+                "HF_HUB_CACHE",
+                "SENTENCE_TRANSFORMERS_HOME",
+                "TRANSFORMERS_CACHE",
+                "HF_HOME",
+            )
+            for variable in variables:
+                environment = {name: "" for name in variables}
+                environment[variable] = cache_root
+                with patch.dict(os.environ, environment):
+                    cache_directory, source = (
+                        rag_service._embedding_cache_configuration()
+                    )
+
+                expected_directory = Path(cache_root)
+                if variable == "HF_HOME":
+                    expected_directory /= "hub"
+                self.assertEqual(cache_directory, expected_directory)
+                self.assertEqual(source, variable)
+
+    def test_model_cache_miss_is_logged_before_downloading(self) -> None:
+        from huggingface_hub.errors import LocalEntryNotFoundError
+
+        with tempfile.TemporaryDirectory() as cache_root:
+            snapshot_directory = Path(cache_root) / "snapshot"
+            environment = {
+                "HF_HUB_CACHE": "",
+                "SENTENCE_TRANSFORMERS_HOME": "",
+                "TRANSFORMERS_CACHE": "",
+                "HF_HOME": cache_root,
+            }
+            with (
+                patch.dict(os.environ, environment),
+                patch(
+                    "huggingface_hub.snapshot_download",
+                    side_effect=[
+                        LocalEntryNotFoundError("cache miss"),
+                        str(snapshot_directory),
+                    ],
+                ) as download,
+                self.assertLogs(rag_service.logger, level="INFO") as logs,
+            ):
+                model_path, cache_directory, source = (
+                    rag_service._resolve_embedding_model_source(
+                        "sentence-transformers/all-MiniLM-L6-v2"
+                    )
+                )
+
+        self.assertEqual(model_path, str(snapshot_directory))
+        self.assertEqual(cache_directory, Path(cache_root) / "hub")
+        self.assertEqual(source, "download")
+        self.assertEqual(download.call_count, 2)
+        self.assertTrue(download.call_args_list[0].kwargs["local_files_only"])
+        self.assertFalse(download.call_args_list[1].kwargs["local_files_only"])
+        output = "\n".join(logs.output)
+        self.assertIn("Model cache lookup result=miss", output)
+        self.assertIn("Model download started", output)
+        self.assertIn("Model download completed", output)
+
+    def test_model_cache_hit_skips_download(self) -> None:
+        with tempfile.TemporaryDirectory() as cache_root:
+            snapshot_directory = Path(cache_root) / "snapshot"
+            environment = {
+                "HF_HUB_CACHE": "",
+                "SENTENCE_TRANSFORMERS_HOME": "",
+                "TRANSFORMERS_CACHE": "",
+                "HF_HOME": cache_root,
+            }
+            with (
+                patch.dict(os.environ, environment),
+                patch(
+                    "huggingface_hub.snapshot_download",
+                    return_value=str(snapshot_directory),
+                ) as download,
+                self.assertLogs(rag_service.logger, level="INFO") as logs,
+            ):
+                model_path, cache_directory, source = (
+                    rag_service._resolve_embedding_model_source(
+                        "sentence-transformers/all-MiniLM-L6-v2"
+                    )
+                )
+
+        self.assertEqual(model_path, str(snapshot_directory))
+        self.assertEqual(cache_directory, Path(cache_root) / "hub")
+        self.assertEqual(source, "cache")
+        download.assert_called_once()
+        self.assertTrue(download.call_args.kwargs["local_files_only"])
+        self.assertIn("Model cache lookup result=hit", "\n".join(logs.output))
+
+    def test_model_local_path_skips_hugging_face_download(self) -> None:
+        with tempfile.TemporaryDirectory() as model_directory:
+            with patch("huggingface_hub.snapshot_download") as download:
+                model_path, _, source = rag_service._resolve_embedding_model_source(
+                    model_directory
+                )
+
+        self.assertEqual(model_path, str(Path(model_directory).resolve()))
+        self.assertEqual(source, "local_path")
+        download.assert_not_called()
 
 
 if __name__ == "__main__":

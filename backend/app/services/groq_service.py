@@ -1,12 +1,15 @@
+from __future__ import annotations
+
 import logging
 import ssl
 from pathlib import Path
 from threading import Lock
-
-import httpx
-from groq import APIConnectionError, APIError, Groq
+from typing import TYPE_CHECKING
 
 from app.core.config import ENV_FILE, settings
+
+if TYPE_CHECKING:
+    from groq import Groq
 
 logger = logging.getLogger(__name__)
 _client: Groq | None = None
@@ -55,6 +58,9 @@ def _get_client() -> Groq:
             f"GROQ_API_KEY is empty. Set it in the environment or {ENV_FILE}."
         )
 
+    import httpx
+    from groq import Groq
+
     if _client is None:
         with _client_lock:
             if _client is None:
@@ -70,6 +76,8 @@ def _get_client() -> Groq:
 def _generate_completion(
     messages: list[dict[str, str]], *, json_mode: bool = False
 ) -> str:
+    from groq import APIConnectionError, APIError
+
     request_options: dict[str, object] = {
         "model": settings.GROQ_MODEL,
         "messages": messages,

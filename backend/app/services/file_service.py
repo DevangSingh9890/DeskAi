@@ -2,6 +2,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 from uuid import UUID, uuid4
 
 from fastapi import UploadFile
@@ -117,6 +118,7 @@ def _read_document(metadata_path: Path) -> Document:
 
 
 def save_document(upload: UploadFile) -> Document:
+    save_started = perf_counter()
     original_filename = (upload.filename or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
     logger.info("Upload started filename=%s", original_filename or "<unnamed>")
     extension = Path(original_filename).suffix.lower()
@@ -160,6 +162,12 @@ def save_document(upload: UploadFile) -> Document:
         temporary_metadata.unlink(missing_ok=True)
         logger.exception("Could not store uploaded document: %s", original_filename)
         raise DocumentStorageError("The document could not be stored.") from exc
+    finally:
+        logger.info(
+            "Save: %.3fs filename=%s",
+            perf_counter() - save_started,
+            original_filename or "<unnamed>",
+        )
 
     logger.info(
         "File saved id=%s filename=%s size=%d",

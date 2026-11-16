@@ -69,6 +69,30 @@ class KnowledgeBaseRouteTests(unittest.TestCase):
         )
         self.assertEqual(self.client.get("/api/documents").json(), [])
 
+    def test_upload_is_saved_and_queued_while_embedding_warms(self) -> None:
+        with patch(
+            "app.routes.knowledge_base.is_embedding_model_warming",
+            return_value=True,
+        ):
+            response = self.client.post(
+                "/api/documents/upload",
+                files={"file": ("queued.txt", b"document content", "text/plain")},
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            response.json(),
+            {
+                "status": "warming",
+                "message": "Embedding model is still warming up. Please wait.",
+            },
+        )
+        self.worker_mock.assert_called_once()
+        listed = self.client.get("/api/documents").json()
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(listed[0]["ingestion_status"], "Processing")
+        self.assertEqual(listed[0]["processing_stage"], "queued")
+
     def test_upload_rejects_unsupported_extension(self) -> None:
         response = self.client.post(
             "/api/documents/upload",

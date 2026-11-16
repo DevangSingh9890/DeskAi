@@ -23,6 +23,7 @@ class Settings:
     GROQ_API_KEY: str
     GROQ_MODEL: str
     GROQ_CA_BUNDLE: str
+    ADMIN_API_KEY: str
     EMBEDDING_MODEL: str
     CHROMA_PERSIST_DIRECTORY: Path
     CHROMA_COLLECTION_NAME: str
@@ -42,6 +43,7 @@ settings = Settings(
     GROQ_API_KEY=_read_setting("GROQ_API_KEY"),
     GROQ_MODEL=_read_setting("GROQ_MODEL", "openai/gpt-oss-20b"),
     GROQ_CA_BUNDLE=_read_setting("GROQ_CA_BUNDLE"),
+    ADMIN_API_KEY=_read_setting("ADMIN_API_KEY"),
     EMBEDDING_MODEL=_read_setting(
         "EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
     ),

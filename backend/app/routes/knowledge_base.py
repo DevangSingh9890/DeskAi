@@ -6,6 +6,7 @@ from app.models.document import (
     DocumentDeleteResponse,
     DocumentJobResponse,
     DocumentSummary,
+    WarmingResponse,
     to_document_job_response,
 )
 from app.services.file_service import (
@@ -19,6 +20,8 @@ from app.services.file_service import (
     update_document_ingestion,
 )
 from app.services.rag_service import (
+    WARMUP_INGESTION_MESSAGE,
+    is_embedding_model_warming,
     process_document_ingestion,
     queue_document_ingestion,
 )
@@ -29,19 +32,21 @@ router = APIRouter()
 
 @router.post(
     "/upload",
-    response_model=DocumentJobResponse,
+    response_model=DocumentJobResponse | WarmingResponse,
     status_code=status.HTTP_201_CREATED,
 )
 def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-) -> DocumentJobResponse:
+) -> DocumentJobResponse | WarmingResponse:
     try:
         document = save_document(file)
         try:
             document, should_schedule = queue_document_ingestion(document.id)
             if should_schedule:
                 background_tasks.add_task(process_document_ingestion, document.id)
+            if is_embedding_model_warming():
+                return WarmingResponse(message=WARMUP_INGESTION_MESSAGE)
             return to_document_job_response(document)
         except Exception as exc:
             logger.exception("Could not queue document indexing id=%s", document.id)

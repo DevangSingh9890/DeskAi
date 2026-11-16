@@ -62,17 +62,104 @@ class ChatRouteTests(unittest.TestCase):
         if settings.GROQ_API_KEY:
             self.assertNotIn(settings.GROQ_API_KEY, response.text)
 
+    def test_debug_performance_reports_model_and_document_count(self) -> None:
+        with (
+            patch("app.routes.chat.is_embedding_model_loaded", return_value=True),
+            patch(
+                "app.routes.chat.get_embedding_warmup_status",
+                return_value={
+                    "warming": False,
+                    "embedding_model_loaded": True,
+                    "warmup_started_at": "2026-11-16T00:00:00+00:00",
+                    "warmup_completed_at": "2026-11-16T00:00:20+00:00",
+                    "warmup_status": "ready",
+                    "warmup_error": None,
+                },
+            ),
+            patch(
+                "app.routes.chat.list_documents",
+                return_value=[
+                    SimpleNamespace(ingestion_status="Indexed") for _ in range(5)
+                ]
+                + [SimpleNamespace(ingestion_status="Processing")],
+            ),
+        ):
+            response = self.client.get("/api/debug/performance")
+
+        self.assertEqual(
+            response.json(),
+            {
+                "warming": False,
+                "embedding_model_loaded": True,
+                "warmup_started_at": "2026-11-16T00:00:00+00:00",
+                "warmup_completed_at": "2026-11-16T00:00:20+00:00",
+                "warmup_status": "ready",
+                "warmup_error": None,
+                "model": settings.EMBEDDING_MODEL,
+                "model_loaded": True,
+                "model_name": settings.EMBEDDING_MODEL,
+                "documents_indexed": 5,
+            },
+        )
+
+    def test_admin_warmup_requires_key_and_warms_model(self) -> None:
+        with patch(
+            "app.routes.chat.settings",
+            SimpleNamespace(ADMIN_API_KEY=""),
+        ):
+            disabled = self.client.post("/api/admin/warmup")
+        self.assertEqual(disabled.status_code, 503)
+
+        with (
+            patch(
+                "app.routes.chat.settings",
+                SimpleNamespace(ADMIN_API_KEY="test-admin-key"),
+            ),
+            patch("app.routes.chat.warm_up_embedding_service") as warmup,
+        ):
+            unauthorized = self.client.post("/api/admin/warmup")
+            invalid_key = self.client.post(
+                "/api/admin/warmup",
+                headers={"X-Admin-Key": "wrong-key"},
+            )
+            response = self.client.post(
+                "/api/admin/warmup",
+                headers={"X-Admin-Key": "test-admin-key"},
+            )
+
+        self.assertEqual(unauthorized.status_code, 401)
+        self.assertEqual(invalid_key.status_code, 401)
+        self.assertEqual(
+            response.json(),
+            {"status": "ready", "model_loaded": True},
+        )
+        warmup.assert_called_once_with()
+
     def test_startup_logs_configuration_without_key_value(self) -> None:
         output = StringIO()
 
         with redirect_stdout(output):
-            with patch("app.main.initialize_embedding_service") as initialize:
-                with patch("app.main.recover_interrupted_ingestions") as recover:
-                    with TestClient(app):
-                        pass
-        initialize.assert_called_once_with()
+            with patch(
+                "app.services.rag_service.initialize_embedding_service"
+            ) as initialize:
+                with patch("app.main.start_background_embedding_warmup") as start:
+                    with patch(
+                        "app.services.rag_service.EmbeddingService.get_model"
+                    ) as get_model:
+                        with patch(
+                            "app.main.recover_interrupted_ingestions"
+                        ) as recover:
+                            with self.assertLogs("app.main", level="INFO") as logs:
+                                with TestClient(app):
+                                    pass
+        initialize.assert_not_called()
+        get_model.assert_not_called()
         recover.assert_called_once_with()
+        start.assert_called_once_with(delay_seconds=3.0)
 
+        self.assertIn("Backend started", "\n".join(logs.output))
+        self.assertIn("Backend startup complete", "\n".join(logs.output))
+        self.assertIn("Embedding model not loaded yet", "\n".join(logs.output))
         self.assertIn(
             f"GROQ_API_KEY loaded: {'YES' if settings.GROQ_API_KEY else 'NO'}",
             output.getvalue(),
@@ -179,6 +266,16 @@ class ChatRouteTests(unittest.TestCase):
             "My VPN is not connecting and I have a client meeting soon."
         )
 
+    def test_classify_endpoint_works_during_embedding_warmup(self) -> None:
+        response = self.client.post(
+            "/api/classify",
+            json={"message": "My VPN is not connecting"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), self.classification.model_dump())
+        self.classify_mock.assert_called_once_with("My VPN is not connecting")
+
     def test_classify_endpoint_rejects_empty_message(self) -> None:
         response = self.client.post("/api/classify", json={"message": " "})
 
@@ -256,8 +353,8 @@ class GroqServiceTests(unittest.TestCase):
         self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
         self.assertTrue(context.check_hostname)
 
-    @patch("app.services.groq_service.Groq")
-    @patch("app.services.groq_service.httpx.Client")
+    @patch("groq.Groq")
+    @patch("httpx.Client")
     def test_groq_client_receives_verified_http_client(
         self, http_client_constructor: MagicMock, groq_constructor: MagicMock
     ) -> None:

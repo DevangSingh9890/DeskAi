@@ -98,6 +98,21 @@
   box-shadow: 0 0 0 3px #e6f5ef;
 }
 
+.header-status--warming .status-dot {
+  background: #d99a22;
+  box-shadow: 0 0 0 3px #fff3d4;
+}
+
+.header-status--failed .status-dot {
+  background: #cf5966;
+  box-shadow: 0 0 0 3px #fbe8eb;
+}
+
+.header-status--checking .status-dot {
+  background: #8b93a5;
+  box-shadow: 0 0 0 3px #eef0f4;
+}
+
 .sidebar-toggle {
   min-height: 34px;
   padding: 0 10px;
@@ -146,6 +161,17 @@
   border-radius: 8px;
   color: #a34a55;
   background: #fff8f8;
+  font-size: 10px;
+}
+
+.dashboard-notice {
+  z-index: 4;
+  margin: 8px 18px 0;
+  padding: 9px 12px;
+  border: 1px solid #f0dfb8;
+  border-radius: 8px;
+  color: #80621f;
+  background: #fffaf0;
   font-size: 10px;
 }
 
@@ -1388,7 +1414,11 @@ label:focus-visible {
   }
 
   .dashboard-header-actions .header-status {
-    display: none;
+    max-width: 154px;
+    gap: 5px;
+    overflow: hidden;
+    font-size: 8px;
+    text-overflow: ellipsis;
   }
 
   .sidebar-toggle {

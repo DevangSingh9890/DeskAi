@@ -3,7 +3,11 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 
 from app.core.config import settings
-from app.models.document import DocumentJobResponse, to_document_job_response
+from app.models.document import (
+    DocumentJobResponse,
+    WarmingResponse,
+    to_document_job_response,
+)
 from app.models.rag import (
     KnowledgeBaseStats,
     SemanticSearchResponse,
@@ -16,10 +20,12 @@ from app.services.file_service import (
     update_document_ingestion,
 )
 from app.services.rag_service import (
+    WARMUP_INGESTION_MESSAGE,
     VectorStoreError,
     delete_document_vectors,
     document_index_lock,
     get_knowledge_stats,
+    is_embedding_model_warming,
     process_document_ingestion,
     queue_document_ingestion,
     search_knowledge,
@@ -31,14 +37,14 @@ router = APIRouter()
 
 @router.post(
     "/{document_id}/ingest",
-    response_model=DocumentJobResponse,
+    response_model=DocumentJobResponse | WarmingResponse,
     status_code=status.HTTP_202_ACCEPTED,
 )
 def ingest_uploaded_document(
     document_id: str,
     background_tasks: BackgroundTasks,
     force: bool = Query(default=False),
-) -> DocumentJobResponse:
+) -> DocumentJobResponse | WarmingResponse:
     try:
         document, should_schedule = queue_document_ingestion(
             document_id,
@@ -50,6 +56,8 @@ def ingest_uploaded_document(
                 document_id,
                 force=True,
             )
+        if is_embedding_model_warming():
+            return WarmingResponse(message=WARMUP_INGESTION_MESSAGE)
         return to_document_job_response(document)
     except DocumentNotFoundError as exc:
         raise HTTPException(

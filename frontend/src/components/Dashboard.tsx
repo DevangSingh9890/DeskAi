@@ -14,7 +14,12 @@ import type {
   DocumentSummary,
   IngestionStatus,
 } from '../services/documentService'
-import { getChatErrorMessage, sendChatMessage } from '../services/api'
+import {
+  getChatErrorMessage,
+  getPerformanceStatus,
+  sendChatMessage,
+} from '../services/api'
+import type { PerformanceStatus } from '../services/api'
 import type { ChatMessage } from '../types/chat'
 
 const greeting: ChatMessage = {
@@ -37,15 +42,23 @@ export function Dashboard() {
   const [isChatLoading, setIsChatLoading] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
   const [documents, setDocuments] = useState<DocumentSummary[]>([])
+  const [performanceStatus, setPerformanceStatus] =
+    useState<PerformanceStatus | null>(null)
   const [isDocumentsLoading, setIsDocumentsLoading] = useState(true)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadingFilename, setUploadingFilename] = useState<string | null>(null)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [documentError, setDocumentError] = useState<string | null>(null)
+  const [documentNotice, setDocumentNotice] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const isIndexing = documents.some(
-    (document) => document.ingestion_status === 'Processing',
+    (document) =>
+      document.ingestion_status === 'Processing' &&
+      !(
+        document.processing_stage === 'queued' &&
+        performanceStatus?.warmup_status !== 'ready'
+      ),
   )
   const processingDocumentIds = documents
     .filter((document) => document.ingestion_status === 'Processing')
@@ -85,6 +98,38 @@ export function Dashboard() {
 
     return () => {
       active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    let timeoutId: number | undefined
+
+    async function pollPerformanceStatus() {
+      try {
+        const status = await getPerformanceStatus()
+        if (!active) return
+        setPerformanceStatus(status)
+        if (status.warming || status.warmup_status === 'not_started') {
+          timeoutId = window.setTimeout(
+            () => void pollPerformanceStatus(),
+            1000,
+          )
+        }
+      } catch {
+        if (active) {
+          timeoutId = window.setTimeout(
+            () => void pollPerformanceStatus(),
+            3000,
+          )
+        }
+      }
+    }
+
+    void pollPerformanceStatus()
+    return () => {
+      active = false
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId)
     }
   }, [])
 
@@ -185,11 +230,27 @@ export function Dashboard() {
     }
 
     setDocumentError(null)
+    setDocumentNotice(null)
     setUploadingFilename(file.name)
     setUploadProgress(0)
     setIsUploading(true)
     try {
       const uploaded = await uploadDocument(file, setUploadProgress)
+      if (uploaded.status === 'warming') {
+        setDocumentNotice(
+          uploaded.message ??
+            'Embedding model is still warming up. Please wait.',
+        )
+        try {
+          await refreshDocuments()
+        } catch (error: unknown) {
+          setDocumentError(
+            `The uploaded document status could not be refreshed: ${getDocumentErrorMessage(error)}`,
+          )
+        }
+        return true
+      }
+
       setDocuments((currentDocuments) => [
         {
           id: uploaded.document_id,
@@ -264,9 +325,27 @@ export function Dashboard() {
           </div>
         </div>
         <div className="dashboard-header-actions">
-          <span className="header-status">
+          <span
+            className={`header-status ${
+              performanceStatus?.warming
+                ? 'header-status--warming'
+                : performanceStatus?.warmup_status === 'failed'
+                  ? 'header-status--failed'
+                  : performanceStatus?.embedding_model_loaded
+                    ? 'header-status--ready'
+                    : 'header-status--checking'
+            }`}
+            role="status"
+            aria-live="polite"
+          >
             <span className="status-dot" aria-hidden="true" />
-            Service online
+            {performanceStatus?.warming
+              ? '🟡 RAG Engine Warming Up'
+              : performanceStatus?.warmup_status === 'failed'
+                ? '🔴 RAG Engine Unavailable'
+                : performanceStatus?.embedding_model_loaded
+                  ? '🟢 RAG Engine Ready'
+                  : 'RAG Engine Checking'}
           </span>
           <button
             className="sidebar-toggle"
@@ -289,6 +368,11 @@ export function Dashboard() {
           <button type="button" onClick={() => setDocumentError(null)} aria-label="Dismiss error">
             ×
           </button>
+        </div>
+      )}
+      {documentNotice && (
+        <div className="dashboard-notice" role="status" aria-live="polite">
+          {documentNotice}
         </div>
       )}
 

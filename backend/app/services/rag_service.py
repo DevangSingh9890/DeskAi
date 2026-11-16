@@ -1,13 +1,14 @@
+from __future__ import annotations
+
 import logging
+import os
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
-from threading import Lock, RLock
-from typing import Any
-
-from chromadb.config import Settings as ChromaSettings
-from langchain_core.documents import Document as LangChainDocument
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from threading import Lock, RLock, Thread
+from time import perf_counter, sleep
+from typing import TYPE_CHECKING, Any
 
 from app.core.config import BACKEND_DIR, settings
 from app.models.document import Document, IngestionStage
@@ -20,15 +21,27 @@ from app.services.file_service import (
     update_document_ingestion,
 )
 
+if TYPE_CHECKING:
+    from langchain_core.documents import Document as LangChainDocument
+
 logger = logging.getLogger(__name__)
 
 _store: Any | None = None
-_embeddings: Any | None = None
-_embedding_initialization_error: Exception | None = None
-_embedding_initialization_attempted = False
 _store_lock = Lock()
-_embedding_lock = Lock()
 _index_lock = RLock()
+_warmup_lock = Lock()
+_warmup_thread: Thread | None = None
+_warmup_thread_started = False
+_pending_ingestions: dict[str, bool] = {}
+_warmup_state: dict[str, Any] = {
+    "warming": False,
+    "embedding_model_loaded": False,
+    "warmup_started_at": None,
+    "warmup_completed_at": None,
+    "warmup_status": "not_started",
+    "warmup_error": None,
+}
+WARMUP_INGESTION_MESSAGE = "Embedding model is still warming up. Please wait."
 
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
@@ -40,6 +53,10 @@ _STAGE_LABELS: dict[IngestionStage, str] = {
     "embedding_generation": "Embedding generation",
     "chroma_insert": "Chroma insert",
     "indexing": "Indexing",
+}
+_TIMED_STAGE_LABELS: dict[IngestionStage, str] = {
+    "text_extraction": "Extraction",
+    "chunking": "Chunking",
 }
 
 
@@ -61,6 +78,159 @@ class IngestionStageError(RuntimeError):
         self.stage = stage
 
 
+class EmbeddingService:
+    _instance: EmbeddingService | None = None
+    _model: Any | None = None
+    _load_error: Exception | None = None
+    _load_attempted = False
+    _instance_lock = Lock()
+    _model_lock = Lock()
+
+    def __new__(cls) -> EmbeddingService:
+        with cls._instance_lock:
+            if cls._instance is None:
+                cls._instance = super().__new__(cls)
+            return cls._instance
+
+    def get_model(self) -> Any:
+        cls = type(self)
+        with cls._model_lock:
+            if cls._model is not None:
+                logger.info("Reusing existing embedding model")
+                return cls._model
+            if cls._load_error is not None:
+                raise VectorStoreError(
+                    f"The local embedding model is unavailable: {cls._load_error}"
+                ) from cls._load_error
+            if cls._load_attempted:
+                raise VectorStoreError("The local embedding model could not be loaded.")
+
+            cls._load_attempted = True
+            load_started = perf_counter()
+            logger.info(
+                "Loading embedding model for first time model=%s",
+                settings.EMBEDDING_MODEL,
+            )
+            try:
+                model_path, cache_directory, source = _resolve_embedding_model_source(
+                    settings.EMBEDDING_MODEL
+                )
+                initialization_started = perf_counter()
+                logger.info("Model initialization started source=%s", source)
+                try:
+                    from langchain_huggingface import HuggingFaceEmbeddings
+
+                    cls._model = HuggingFaceEmbeddings(
+                        model_name=model_path,
+                        cache_folder=(
+                            str(cache_directory)
+                            if cache_directory is not None
+                            else None
+                        ),
+                        model_kwargs={"device": "cpu", "local_files_only": True},
+                        encode_kwargs={"normalize_embeddings": True},
+                    )
+                finally:
+                    logger.info(
+                        "Model initialization time: %.3f seconds",
+                        perf_counter() - initialization_started,
+                    )
+            except Exception as exc:
+                cls._load_error = exc
+                logger.info(
+                    "Model load time: %.3f seconds", perf_counter() - load_started
+                )
+                logger.exception(
+                    "Embedding model load failed model=%s", settings.EMBEDDING_MODEL
+                )
+                raise VectorStoreError(
+                    f"The local embedding model is unavailable: {exc}"
+                ) from exc
+
+            logger.info(
+                "Embedding model loaded successfully model=%s",
+                settings.EMBEDDING_MODEL,
+            )
+            logger.info(
+                "Model load time: %.3f seconds", perf_counter() - load_started
+            )
+            return cls._model
+
+
+def _embedding_cache_configuration() -> tuple[Path | None, str]:
+    for variable in (
+        "HF_HUB_CACHE",
+        "SENTENCE_TRANSFORMERS_HOME",
+        "TRANSFORMERS_CACHE",
+    ):
+        value = os.getenv(variable, "").strip()
+        if value:
+            return Path(value).expanduser(), variable
+
+    hf_home = os.getenv("HF_HOME", "").strip()
+    if hf_home:
+        return Path(hf_home).expanduser() / "hub", "HF_HOME"
+    return None, "default"
+
+
+def _resolve_embedding_model_source(
+    model_name: str,
+) -> tuple[str, Path | None, str]:
+    configured_path = Path(model_name).expanduser()
+    if not configured_path.is_absolute():
+        configured_path = BACKEND_DIR / configured_path
+    if configured_path.is_dir():
+        logger.info("Model source=local_path")
+        cache_directory, _ = _embedding_cache_configuration()
+        return str(configured_path.resolve()), cache_directory, "local_path"
+
+    cache_directory, cache_source = _embedding_cache_configuration()
+    logger.info("Model cache lookup started cache_source=%s", cache_source)
+    cache_started = perf_counter()
+    from huggingface_hub import snapshot_download
+    from huggingface_hub.errors import LocalEntryNotFoundError
+
+    cache_arguments = {
+        "repo_id": model_name,
+        "cache_dir": str(cache_directory) if cache_directory is not None else None,
+    }
+
+    try:
+        snapshot_path = snapshot_download(
+            **cache_arguments,
+            local_files_only=True,
+        )
+    except LocalEntryNotFoundError:
+        logger.info(
+            "Model cache lookup result=miss lookup_time=%.3f seconds",
+            perf_counter() - cache_started,
+        )
+        download_started = perf_counter()
+        logger.info("Model download started model=%s", model_name)
+        try:
+            snapshot_path = snapshot_download(
+                **cache_arguments,
+                local_files_only=False,
+            )
+        except Exception:
+            logger.exception(
+                "Model download failed download_time=%.3f seconds",
+                perf_counter() - download_started,
+            )
+            raise
+        logger.info(
+            "Model download completed download_time=%.3f seconds",
+            perf_counter() - download_started,
+        )
+        return str(snapshot_path), cache_directory, "download"
+
+    logger.info(
+        "Model cache lookup result=hit lookup_time=%.3f seconds",
+        perf_counter() - cache_started,
+    )
+    return str(snapshot_path), cache_directory, "cache"
+
+
 @contextmanager
 def document_index_lock() -> Generator[None, None, None]:
     with _index_lock:
@@ -72,7 +242,9 @@ def _get_store() -> Any:
     if _store is None:
         with _store_lock:
             if _store is None:
+                initialization_started = perf_counter()
                 try:
+                    from chromadb.config import Settings as ChromaSettings
                     from langchain_chroma import Chroma
 
                     persist_directory = settings.CHROMA_PERSIST_DIRECTORY
@@ -85,8 +257,16 @@ def _get_store() -> Any:
                         collection_metadata={"hnsw:space": "cosine"},
                         client_settings=ChromaSettings(anonymized_telemetry=False),
                     )
+                    logger.info(
+                        "Chroma initialization time: %.3f seconds",
+                        perf_counter() - initialization_started,
+                    )
                 except Exception as exc:
                     logger.exception("Could not initialize the Chroma collection")
+                    logger.info(
+                        "Chroma initialization failed after %.3f seconds",
+                        perf_counter() - initialization_started,
+                    )
                     raise VectorStoreError(
                         f"The vector database is unavailable: {exc}"
                     ) from exc
@@ -94,47 +274,128 @@ def _get_store() -> Any:
 
 
 def initialize_embedding_service() -> None:
-    global _embeddings, _embedding_initialization_error
-    global _embedding_initialization_attempted
-
-    with _embedding_lock:
-        if _embeddings is not None:
-            return
-        if _embedding_initialization_error is not None:
-            raise VectorStoreError(
-                f"The local embedding model is unavailable: "
-                f"{_embedding_initialization_error}"
-            ) from _embedding_initialization_error
-        if _embedding_initialization_attempted:
-            raise VectorStoreError("The local embedding model could not be loaded.")
-
-        _embedding_initialization_attempted = True
-        logger.info("Embedding model load started model=%s", settings.EMBEDDING_MODEL)
-        try:
-            from langchain_huggingface import HuggingFaceEmbeddings
-
-            _embeddings = HuggingFaceEmbeddings(
-                model_name=settings.EMBEDDING_MODEL,
-                model_kwargs={"device": "cpu"},
-                encode_kwargs={"normalize_embeddings": True},
-            )
-        except Exception as exc:
-            _embedding_initialization_error = exc
-            logger.exception(
-                "Embedding model load failed model=%s", settings.EMBEDDING_MODEL
-            )
-            raise VectorStoreError(
-                f"The local embedding model is unavailable: {exc}"
-            ) from exc
-
-        logger.info("Embedding model load completed model=%s", settings.EMBEDDING_MODEL)
+    EmbeddingService().get_model()
 
 
 def _get_embeddings() -> Any:
-    global _embeddings
-    if _embeddings is None:
-        initialize_embedding_service()
-    return _embeddings
+    return EmbeddingService().get_model()
+
+
+def is_embedding_model_loaded() -> bool:
+    return EmbeddingService._model is not None
+
+
+def is_embedding_model_warming() -> bool:
+    with _warmup_lock:
+        return bool(_warmup_state["warming"])
+
+
+def get_embedding_warmup_status() -> dict[str, Any]:
+    with _warmup_lock:
+        state = dict(_warmup_state)
+    state["embedding_model_loaded"] = is_embedding_model_loaded()
+    return state
+
+
+def start_background_embedding_warmup(delay_seconds: float = 0.0) -> None:
+    global _warmup_thread, _warmup_thread_started
+    with _warmup_lock:
+        if _warmup_thread_started:
+            return
+        _warmup_thread_started = True
+        _warmup_state.update(
+            {
+                "warming": True,
+                "embedding_model_loaded": is_embedding_model_loaded(),
+                "warmup_started_at": datetime.now(timezone.utc).isoformat(),
+                "warmup_completed_at": None,
+                "warmup_status": "warming",
+                "warmup_error": None,
+            }
+        )
+        _warmup_thread = Thread(
+            target=_run_background_embedding_warmup,
+            args=(delay_seconds,),
+            name="embedding-model-warmup",
+            daemon=True,
+        )
+        try:
+            _warmup_thread.start()
+        except Exception:
+            _warmup_state.update(
+                {
+                    "warming": False,
+                    "warmup_completed_at": datetime.now(timezone.utc).isoformat(),
+                    "warmup_status": "failed",
+                    "warmup_error": "Embedding model warm-up could not start.",
+                }
+            )
+            logger.exception("Could not start background embedding warmup")
+
+
+def _run_background_embedding_warmup(delay_seconds: float) -> None:
+    if delay_seconds > 0:
+        sleep(delay_seconds)
+    logger.info("Background embedding warmup started")
+    try:
+        warm_up_embedding_service()
+    except Exception:
+        logger.exception("Background embedding warmup failed")
+        _finish_background_embedding_warmup(success=False)
+        return
+
+    logger.info("Warmup completed")
+    _finish_background_embedding_warmup(success=True)
+
+
+def _finish_background_embedding_warmup(*, success: bool) -> None:
+    with _warmup_lock:
+        _warmup_state.update(
+            {
+                "warming": False,
+                "embedding_model_loaded": is_embedding_model_loaded(),
+                "warmup_completed_at": datetime.now(timezone.utc).isoformat(),
+                "warmup_status": "ready" if success else "failed",
+                "warmup_error": (
+                    None if success else "Embedding model warm-up failed."
+                ),
+            }
+        )
+        pending_ingestions = list(_pending_ingestions.items())
+        _pending_ingestions.clear()
+
+    for document_id, force in pending_ingestions:
+        process_document_ingestion(document_id, force=force)
+
+
+def _defer_ingestion_while_warming(document_id: str, *, force: bool) -> bool:
+    with _warmup_lock:
+        if not _warmup_state["warming"]:
+            return False
+        _pending_ingestions[document_id] = (
+            _pending_ingestions.get(document_id, False) or force
+        )
+        logger.info(
+            "Indexing deferred until embedding warmup completes id=%s",
+            document_id,
+        )
+        return True
+
+
+def warm_up_embedding_service() -> None:
+    model = _get_embeddings()
+    warmup_started = perf_counter()
+    try:
+        embedding = model.embed_query("DeskAI embedding model warm-up")
+        if not embedding:
+            raise ValueError("The embedding model returned an empty vector.")
+    except Exception as exc:
+        logger.exception("Embedding model warm-up failed")
+        raise VectorStoreError("The embedding model warm-up failed.") from exc
+    logger.info(
+        "Model warm-up embedding time: %.3f seconds",
+        perf_counter() - warmup_started,
+    )
 
 
 def queue_document_ingestion(
@@ -184,6 +445,7 @@ def _run_stage(
     operation: Callable[[], Any],
 ) -> Any:
     label = _STAGE_LABELS[stage]
+    stage_started = perf_counter()
     update_document_ingestion(
         document_id,
         "Processing",
@@ -197,6 +459,15 @@ def _run_stage(
         logger.exception("%s failed id=%s", label, document_id)
         message = str(exc).strip() or type(exc).__name__
         raise IngestionStageError(stage, message) from exc
+    finally:
+        timing_label = _TIMED_STAGE_LABELS.get(stage)
+        if timing_label:
+            logger.info(
+                "%s: %.3fs id=%s",
+                timing_label,
+                perf_counter() - stage_started,
+                document_id,
+            )
     logger.info("%s completed id=%s", label, document_id)
     return result
 
@@ -243,6 +514,7 @@ def ingest_document(document: Document, *, force: bool = False) -> Document:
         if document.ingestion_status == "Indexed" and not force:
             return document
 
+        indexing_started = perf_counter()
         try:
             logger.info(
                 "Indexing started id=%s filename=%s",
@@ -261,6 +533,8 @@ def ingest_document(document: Document, *, force: bool = False) -> Document:
             )
 
             def split_documents() -> list[LangChainDocument]:
+                from langchain_text_splitters import RecursiveCharacterTextSplitter
+
                 splitter = RecursiveCharacterTextSplitter(
                     chunk_size=CHUNK_SIZE,
                     chunk_overlap=CHUNK_OVERLAP,
@@ -305,18 +579,26 @@ def ingest_document(document: Document, *, force: bool = False) -> Document:
 
             def generate_embeddings() -> list[list[float]]:
                 embeddings = _get_embeddings()
-                vectors: list[list[float]] = []
-                for start in range(0, len(chunks), EMBEDDING_BATCH_SIZE):
-                    texts = [
-                        chunk.page_content
-                        for chunk in chunks[start : start + EMBEDDING_BATCH_SIZE]
-                    ]
-                    vectors.extend(embeddings.embed_documents(texts))
-                if len(vectors) != len(chunks):
-                    raise ValueError(
-                        "Embedding model returned an unexpected number of vectors."
+                embedding_started = perf_counter()
+                try:
+                    vectors: list[list[float]] = []
+                    for start in range(0, len(chunks), EMBEDDING_BATCH_SIZE):
+                        texts = [
+                            chunk.page_content
+                            for chunk in chunks[start : start + EMBEDDING_BATCH_SIZE]
+                        ]
+                        vectors.extend(embeddings.embed_documents(texts))
+                    if len(vectors) != len(chunks):
+                        raise ValueError(
+                            "Embedding model returned an unexpected number of vectors."
+                        )
+                    return vectors
+                finally:
+                    logger.info(
+                        "Embedding: %.3fs id=%s",
+                        perf_counter() - embedding_started,
+                        document.id,
                     )
-                return vectors
 
             vectors = _run_stage(
                 document.id,
@@ -326,20 +608,28 @@ def ingest_document(document: Document, *, force: bool = False) -> Document:
 
             def insert_vectors() -> None:
                 store = _get_store()
-                existing = store.get(
-                    where={"document_id": document.id},
-                    include=["metadatas"],
-                )
-                store._collection.upsert(
-                    embeddings=vectors,
-                    documents=[chunk.page_content for chunk in chunks],
-                    metadatas=metadatas,
-                    ids=chunk_ids,
-                )
+                insert_started = perf_counter()
+                try:
+                    existing = store.get(
+                        where={"document_id": document.id},
+                        include=["metadatas"],
+                    )
+                    store._collection.upsert(
+                        embeddings=vectors,
+                        documents=[chunk.page_content for chunk in chunks],
+                        metadatas=metadatas,
+                        ids=chunk_ids,
+                    )
 
-                stale_ids = set(existing["ids"]) - set(chunk_ids)
-                if stale_ids:
-                    store.delete(ids=sorted(stale_ids))
+                    stale_ids = set(existing["ids"]) - set(chunk_ids)
+                    if stale_ids:
+                        store.delete(ids=sorted(stale_ids))
+                finally:
+                    logger.info(
+                        "Chroma Insert: %.3fs id=%s",
+                        perf_counter() - insert_started,
+                        document.id,
+                    )
 
             _run_stage(document.id, "chroma_insert", insert_vectors)
 
@@ -377,9 +667,17 @@ def ingest_document(document: Document, *, force: bool = False) -> Document:
                 processing_error=message,
             )
             raise IngestionStageError("indexing", message) from exc
+        finally:
+            logger.info(
+                "Total Indexing: %.3fs id=%s",
+                perf_counter() - indexing_started,
+                document.id,
+            )
 
 
 def process_document_ingestion(document_id: str, *, force: bool = False) -> None:
+    if _defer_ingestion_while_warming(document_id, force=force):
+        return
     try:
         document = get_document(document_id)
         ingest_document(document, force=force)
@@ -403,17 +701,38 @@ def process_document_ingestion(document_id: str, *, force: bool = False) -> None
 
 
 def search_knowledge(query: str, top_k: int = 4) -> list[dict[str, Any]]:
+    retrieval_started = perf_counter()
     try:
-        embedding = _get_embeddings().embed_query(query)
-        matches = _get_store().similarity_search_by_vector_with_relevance_scores(
-            embedding=embedding,
-            k=top_k,
-        )
+        embeddings = _get_embeddings()
+        embedding_started = perf_counter()
+        try:
+            embedding = embeddings.embed_query(query)
+        finally:
+            logger.info(
+                "Embedding: %.3fs operation=query",
+                perf_counter() - embedding_started,
+            )
+        store = _get_store()
+        chroma_search_started = perf_counter()
+        try:
+            matches = store.similarity_search_by_vector_with_relevance_scores(
+                embedding=embedding,
+                k=top_k,
+            )
+        finally:
+            logger.info(
+                "Chroma retrieval time: %.3f seconds",
+                perf_counter() - chroma_search_started,
+            )
     except VectorStoreError:
         raise
     except Exception as exc:
         logger.exception("Semantic search failed")
         raise VectorStoreError("Semantic search is unavailable.") from exc
+    finally:
+        logger.info(
+            "Retrieval duration seconds=%.3f", perf_counter() - retrieval_started
+        )
 
     return [
         {

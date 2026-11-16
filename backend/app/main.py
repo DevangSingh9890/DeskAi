@@ -1,6 +1,6 @@
-from contextlib import asynccontextmanager
 import logging
-from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,39 +11,38 @@ from app.routes.knowledge_base import router as knowledge_base_router
 from app.routes.rag import router as rag_router
 from app.services.file_service import ensure_uploads_dir
 from app.services.rag_service import (
-    VectorStoreError,
-    initialize_embedding_service,
+    is_embedding_model_loaded,
     recover_interrupted_ingestions,
+    start_background_embedding_warmup,
 )
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
     ensure_uploads_dir()
     recover_interrupted_ingestions()
-    try:
-        initialize_embedding_service()
-    except VectorStoreError:
-        logging.getLogger(__name__).error(
-            "Embedding model is unavailable; indexing will fail until the backend restarts."
-        )
 
     api_key = settings.GROQ_API_KEY
     print("GROQ_API_KEY loaded:", "YES" if api_key else "NO")
     print("GROQ_MODEL:", settings.GROQ_MODEL)
     if api_key:
-        logging.getLogger(__name__).info(
-            "Groq configuration loaded (API key value omitted)"
-        )
+        logger.info("Groq configuration loaded (API key value omitted)")
     else:
-        logging.getLogger(__name__).error(
+        logger.error(
             "GROQ_API_KEY is missing or empty; checked environment and %s",
             ENV_FILE,
         )
+    logger.info("Backend started")
+    logger.info("Backend startup complete")
+    logger.info("Embedding model not loaded yet")
+    # Give Uvicorn time to bind and answer readiness probes before ML imports.
+    start_background_embedding_warmup(delay_seconds=3.0)
     yield
 
 
@@ -67,4 +66,12 @@ def health_check() -> dict[str, str]:
     return {
         "status": "running",
         "service": "AI Service Desk Backend",
+    }
+
+
+@app.get("/api/health")
+def api_health_check() -> dict[str, str | bool]:
+    return {
+        "backend": "ready",
+        "embedding_model_loaded": is_embedding_model_loaded(),
     }

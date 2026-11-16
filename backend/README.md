@@ -30,11 +30,56 @@ Copy `.env.example` to `.env` and set `GROQ_API_KEY`. The default Groq model is
 | `CHROMA_PERSIST_DIRECTORY` | `./chroma_db` | Persistent vector database directory, relative to `backend` |
 | `CHROMA_COLLECTION_NAME` | `deskai_knowledge` | Chroma collection |
 | `RAG_RELEVANCE_THRESHOLD` | `0.35` | Minimum LangChain cosine relevance score returned in search results |
+| `HF_HOME` | Hugging Face default | Hugging Face cache root; snapshots are stored under `hub` |
+| `TRANSFORMERS_CACHE` | Hugging Face default | Optional Transformers cache directory |
+| `SENTENCE_TRANSFORMERS_HOME` | Sentence Transformers default | Optional Sentence Transformers cache directory |
+| `ADMIN_API_KEY` | unset | Required to enable the protected model warm-up endpoint |
 
-No OpenAI embedding key or Hugging Face key is used. The Hugging Face model is
-loaded once per backend process during startup and cached locally. The first
-startup may download the model. Existing comma-separated `CORS_ORIGINS`
-configuration is unchanged.
+No OpenAI embedding key or Hugging Face key is used. The API starts without
+loading the embedding model; it is loaded once per backend process on the first
+document-ingestion or semantic-search request and reused afterward. The first
+RAG request may take longer while the model is loaded or downloaded.
+Existing comma-separated `CORS_ORIGINS` configuration is unchanged.
+
+## Embedding model cache and warm-up
+
+The first model use checks the configured local model path, then performs an
+offline Hugging Face cache lookup. On a miss, the backend downloads the model
+and logs cache lookup, download, model initialization, and total model-load
+times separately. Subsequent requests reuse the in-memory model. Cache
+directory precedence is `HF_HUB_CACHE`, `SENTENCE_TRANSFORMERS_HOME`,
+`TRANSFORMERS_CACHE`, then `HF_HOME/hub`; without these settings, the Hugging
+Face default cache is used.
+
+Pre-download the model during image or deployment preparation, rather than
+making production requests wait for a network download:
+
+```powershell
+python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='sentence-transformers/all-MiniLM-L6-v2', local_dir='models/all-MiniLM-L6-v2')"
+```
+
+Then set `EMBEDDING_MODEL=./models/all-MiniLM-L6-v2`. The local model path is
+resolved relative to the backend directory. Mount that directory read-only in
+production. To prohibit Hub network access, set `HF_HUB_OFFLINE=1`; the backend
+will fail explicitly if the local model files are missing.
+
+Backend startup launches a daemon thread that loads the model and runs a sample
+embedding. Startup does not wait for this work. The performance endpoint and UI
+report whether the RAG engine is warming, ready, or unavailable. The UI keeps
+uploads enabled while warming; uploaded files are queued and indexed when
+warm-up finishes.
+
+To explicitly run or verify warm-up after deployment, set a private
+`ADMIN_API_KEY` and call the protected endpoint:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8000/api/admin/warmup `
+  -Headers @{ "X-Admin-Key" = $env:ADMIN_API_KEY }
+```
+
+The model remains in memory for the lifetime of that worker process. Each
+Uvicorn worker process has its own model instance.
 
 Groq requests use TLS certificate verification with the operating system's
 trusted CA certificates. If your organization intercepts outbound TLS and its
@@ -70,6 +115,43 @@ itself is never returned:
 }
 ```
 
+### `GET /api/debug/performance`
+
+Returns warm-up state, timestamps, configured model, and indexed-document count.
+It does not initialize the model:
+
+```json
+{
+  "warming": true,
+  "embedding_model_loaded": false,
+  "warmup_started_at": "2026-11-16T05:30:00+00:00",
+  "warmup_completed_at": null,
+  "warmup_status": "warming",
+  "warmup_error": null,
+  "model": "sentence-transformers/all-MiniLM-L6-v2",
+  "model_loaded": false,
+  "model_name": "sentence-transformers/all-MiniLM-L6-v2",
+  "documents_indexed": 5
+}
+```
+
+The frontend displays **RAG Engine Warming Up** or **RAG Engine Ready** from
+these fields. While warming, uploads are saved and queued without starting
+indexing; the upload response is:
+
+```json
+{
+  "status": "warming",
+  "message": "Embedding model is still warming up. Please wait."
+}
+```
+
+### `POST /api/admin/warmup`
+
+Verifies embedding generation using the existing singleton. The endpoint is
+disabled unless `ADMIN_API_KEY` is configured and requires that value in the
+`X-Admin-Key` header.
+
 ### `GET /`
 
 Returns the service health:
@@ -78,6 +160,18 @@ Returns the service health:
 {
   "status": "running",
   "service": "AI Service Desk Backend"
+}
+```
+
+### `GET /api/health`
+
+Returns backend readiness and whether this process has loaded the embedding
+model. Checking health does not load the model:
+
+```json
+{
+  "backend": "ready",
+  "embedding_model_loaded": false
 }
 ```
 

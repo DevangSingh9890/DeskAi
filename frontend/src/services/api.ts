@@ -1,10 +1,25 @@
 import axios from 'axios'
 import type { ChatRequest, ChatResponse } from '../types/chat'
 
+export interface PerformanceStatus {
+  warming: boolean
+  embedding_model_loaded: boolean
+  model: string
+  warmup_started_at: string | null
+  warmup_completed_at: string | null
+  warmup_status: 'not_started' | 'warming' | 'ready' | 'failed'
+  warmup_error: string | null
+}
+
 export const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000',
   timeout: 30_000,
 })
+
+export async function getPerformanceStatus(): Promise<PerformanceStatus> {
+  const { data } = await api.get<PerformanceStatus>('/api/debug/performance')
+  return data
+}
 
 export async function sendChatMessage(message: string): Promise<ChatResponse> {
   const request: ChatRequest = { message }
