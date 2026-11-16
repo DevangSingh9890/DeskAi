@@ -1,10 +1,12 @@
 import { useEffect, useRef } from 'react'
 import type { ChatMessage } from '../types/chat'
+import { AgentWorkflowCard } from './AgentWorkflowCard'
 import { MessageBubble } from './MessageBubble'
 
 interface ChatContainerProps {
   messages: ChatMessage[]
   isLoading: boolean
+  agentProgress: number | null
   error: string | null
   onSelectSuggestion: (value: string) => void
 }
@@ -15,25 +17,20 @@ const suggestions = [
   'My laptop is running slowly',
 ]
 
-function TypingIndicator() {
+function AgentProgressIndicator({ activeStep }: { activeStep: number }) {
   return (
-    <div className="message-row message-row--assistant" aria-label="Assistant is typing">
+    <div className="message-row message-row--assistant">
       <div className="message-avatar message-avatar--assistant" aria-hidden="true">
         <svg viewBox="0 0 24 24">
           <path d="M12 2.8 13.8 9l6.2 1.8-6.2 1.8-1.8 6.2-1.8-6.2L4 10.8 10.2 9 12 2.8Z" />
         </svg>
       </div>
-      <div className="message-content">
+      <div className="message-content message-content--agent">
         <div className="message-meta">
-          <span className="message-author">DeskAI Assistant</span>
-          <span className="message-time">Thinking</span>
+          <span className="message-author">DeskAI Agent Team</span>
+          <span className="message-time">Working on your request</span>
         </div>
-        <div className="typing-bubble" role="status">
-          <span />
-          <span />
-          <span />
-          <span className="sr-only">Assistant is preparing a response</span>
-        </div>
+        <AgentWorkflowCard activeStep={activeStep} />
       </div>
     </div>
   )
@@ -42,6 +39,7 @@ function TypingIndicator() {
 export function ChatContainer({
   messages,
   isLoading,
+  agentProgress,
   error,
   onSelectSuggestion,
 }: ChatContainerProps) {
@@ -104,7 +102,9 @@ export function ChatContainer({
           </div>
         )}
 
-        {isLoading && <TypingIndicator />}
+        {isLoading && (
+          <AgentProgressIndicator activeStep={agentProgress ?? 0} />
+        )}
         <div ref={endOfMessagesRef} />
       </div>
 

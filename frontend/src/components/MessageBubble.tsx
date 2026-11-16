@@ -1,4 +1,9 @@
 import type { ChatMessage } from '../types/chat'
+import { AgentWorkflowCard } from './AgentWorkflowCard'
+import { ClassificationCard } from './ClassificationCard'
+import { KnowledgeSourcesCard } from './KnowledgeSourcesCard'
+import { RecommendationCard } from './RecommendationCard'
+import { TroubleshootingCard } from './TroubleshootingCard'
 
 interface MessageBubbleProps {
   message: ChatMessage
@@ -41,36 +46,45 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             })}
           </time>
         </div>
-        <div className={`message-bubble ${isAssistant ? 'message-bubble--assistant' : 'message-bubble--user'}`}>
-          {message.content}
-        </div>
-        {isAssistant && message.classification && (
-          <section className="classification-card" aria-label="Incident classification">
-            <div className="classification-heading">
-              <strong>{message.classification.issue}</strong>
-              <span className={`classification-priority classification-priority--${message.classification.priority.toLowerCase()}`}>
-                {message.classification.priority}
-              </span>
+        {isAssistant && message.agentResponse ? (
+          <>
+            <AgentWorkflowCard
+              completedAt={message.timestamp}
+              durationMs={message.workflowDurationMs}
+            />
+            <div className="agent-result-grid">
+              <ClassificationCard
+                classification={message.agentResponse.classification}
+              />
+              <KnowledgeSourcesCard
+                sources={message.agentResponse.knowledge_sources}
+              />
+              <TroubleshootingCard
+                troubleshooting={message.agentResponse.troubleshooting}
+              />
+              <RecommendationCard
+                recommendedAction={
+                  message.agentResponse.recommended_action ??
+                  message.agentResponse.troubleshooting?.recommended_action ??
+                  message.agentResponse.troubleshooting?.escalation_recommendation
+                }
+                followUpSuggestions={
+                  message.agentResponse.follow_up_suggestions ??
+                  message.agentResponse.troubleshooting?.follow_up_suggestions
+                }
+                summary={message.agentResponse.summary ?? message.agentResponse.response ?? message.content}
+              />
             </div>
-            <dl className="classification-details">
-              <div>
-                <dt>Category</dt>
-                <dd>{message.classification.category} / {message.classification.subcategory}</dd>
-              </div>
-              <div>
-                <dt>Impact</dt>
-                <dd>{message.classification.impact}</dd>
-              </div>
-              <div>
-                <dt>Assigned group</dt>
-                <dd>{message.classification.assigned_group}</dd>
-              </div>
-              <div>
-                <dt>Confidence</dt>
-                <dd>{Math.round(message.classification.confidence_score * 100)}%</dd>
-              </div>
-            </dl>
-          </section>
+          </>
+        ) : (
+          <>
+            <div className={`message-bubble ${isAssistant ? 'message-bubble--assistant' : 'message-bubble--user'}`}>
+              {message.content}
+            </div>
+            {isAssistant && message.classification && (
+              <ClassificationCard classification={message.classification} />
+            )}
+          </>
         )}
       </div>
       {!isAssistant && (

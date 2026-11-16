@@ -1,5 +1,9 @@
 import axios from 'axios'
-import type { ChatRequest, ChatResponse } from '../types/chat'
+import type {
+  AgentChatResponse,
+  ChatRequest,
+  ChatResponse,
+} from '../types/chat'
 
 export interface PerformanceStatus {
   warming: boolean
@@ -24,6 +28,14 @@ export async function getPerformanceStatus(): Promise<PerformanceStatus> {
 export async function sendChatMessage(message: string): Promise<ChatResponse> {
   const request: ChatRequest = { message }
   const { data } = await api.post<ChatResponse>('/api/chat', request)
+  return data
+}
+
+export async function sendAgentChatMessage(
+  message: string,
+): Promise<AgentChatResponse> {
+  const request: ChatRequest = { message }
+  const { data } = await api.post<AgentChatResponse>('/api/agent/chat', request)
   return data
 }
 

@@ -209,6 +209,44 @@ whitespace-only message is rejected with HTTP 422. If the Groq API key is
 missing, the endpoint responds with HTTP 503; upstream Groq failures respond
 with HTTP 502.
 
+### `POST /api/agent/chat`
+
+Runs the LangGraph service-desk workflow: supervisor routing, incident
+classification, Chroma knowledge retrieval, and context-grounded
+troubleshooting. The supervisor can skip agents that are not needed.
+
+Request:
+
+```json
+{
+  "message": "My VPN is not connecting"
+}
+```
+
+The response contains the existing classification fields (including
+`confidence_score` and the `confidence` alias), unique knowledge source names,
+structured troubleshooting, and a formatted response:
+
+```json
+{
+  "classification": {
+    "category": "Network",
+    "subcategory": "VPN",
+    "priority": "High",
+    "impact": "Single User",
+    "assigned_group": "Network Support",
+    "confidence": 0.95
+  },
+  "knowledge_sources": ["VPN Guide.pdf"],
+  "troubleshooting": {
+    "likely_cause": "The VPN client is disconnected.",
+    "troubleshooting_steps": ["Restart the VPN client."],
+    "escalation_recommendation": "Contact Network Support if the issue continues."
+  },
+  "response": "Likely cause: ...\nTroubleshooting steps:\n..."
+}
+```
+
 ### `POST /api/classify`
 
 Classifies an incident without generating a knowledge-base answer.

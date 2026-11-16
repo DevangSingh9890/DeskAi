@@ -2,8 +2,12 @@ import logging
 from secrets import compare_digest
 
 from fastapi import APIRouter, Header, HTTPException, status
+from pydantic import ValidationError
 
+from app.agents.classification_agent import ClassificationAgentError
 from app.core.config import settings
+from app.graphs.service_desk_graph import run_service_desk_graph
+from app.models.agent import AgentChatResponse
 from app.models.classification import (
     ClassificationRequest,
     IncidentClassification,
@@ -146,6 +150,41 @@ def chat(request: ChatRequest) -> ChatResponse:
     if sources and response != NO_KNOWLEDGE_RESPONSE:
         response = f"{response}\n\nSources: {', '.join(sources)}"
     return ChatResponse(response=response, classification=classification)
+
+
+@router.post("/agent/chat", response_model=AgentChatResponse)
+def agent_chat(request: ChatRequest) -> AgentChatResponse:
+    try:
+        state = run_service_desk_graph(request.message)
+    except GroqConfigurationError as exc:
+        logger.error("Groq API is not configured for agent orchestration: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The AI service is not configured.",
+        ) from exc
+    except VectorStoreError as exc:
+        logger.exception("Agent knowledge retrieval failed")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The knowledge base is unavailable.",
+        ) from exc
+    except (
+        ClassificationAgentError,
+        GroqServiceError,
+        ValidationError,
+    ) as exc:
+        logger.exception("Service-desk agent graph failed")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="The service-desk agent workflow failed.",
+        ) from exc
+
+    return AgentChatResponse(
+        classification=state.get("classification", {}),
+        knowledge_sources=state.get("knowledge", {}).get("sources", []),
+        troubleshooting=state.get("troubleshooting", {}),
+        response=state.get("final_response", {}).get("response", ""),
+    )
 
 
 @router.post("/classify", response_model=IncidentClassification)

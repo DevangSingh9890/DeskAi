@@ -1,8 +1,10 @@
 import logging
+from typing import Any
 
 from pydantic import ValidationError
 
 from app.models.classification import IncidentClassification
+from app.graphs.state import ServiceDeskState
 from app.services.groq_service import generate_json_response
 
 logger = logging.getLogger(__name__)
@@ -61,3 +63,14 @@ def classify_incident_message(message: str) -> IncidentClassification:
         classification.confidence_score,
     )
     return classification
+
+
+def classification_agent(state: ServiceDeskState) -> dict[str, Any]:
+    logger.info("Classification Started")
+    if not state.get("run_classification", True):
+        return {"classification": {}}
+
+    classification = classify_incident_message(state["user_message"])
+    result = classification.model_dump()
+    result["confidence"] = classification.confidence_score
+    return {"classification": result}
