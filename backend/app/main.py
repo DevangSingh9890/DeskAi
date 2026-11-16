@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import ENV_FILE, settings
+from app.database.database import initialize_database
 from app.routes.chat import router as chat_router
 from app.routes.knowledge_base import router as knowledge_base_router
 from app.routes.rag import router as rag_router
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
+    initialize_database()
     ensure_uploads_dir()
     recover_interrupted_ingestions()
 

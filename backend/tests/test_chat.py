@@ -139,19 +139,21 @@ class ChatRouteTests(unittest.TestCase):
         output = StringIO()
 
         with redirect_stdout(output):
-            with patch(
-                "app.services.rag_service.initialize_embedding_service"
-            ) as initialize:
-                with patch("app.main.start_background_embedding_warmup") as start:
-                    with patch(
-                        "app.services.rag_service.EmbeddingService.get_model"
-                    ) as get_model:
+            with patch("app.main.initialize_database") as initialize_database:
+                with patch(
+                    "app.services.rag_service.initialize_embedding_service"
+                ) as initialize:
+                    with patch("app.main.start_background_embedding_warmup") as start:
                         with patch(
-                            "app.main.recover_interrupted_ingestions"
-                        ) as recover:
-                            with self.assertLogs("app.main", level="INFO") as logs:
-                                with TestClient(app):
-                                    pass
+                            "app.services.rag_service.EmbeddingService.get_model"
+                        ) as get_model:
+                            with patch(
+                                "app.main.recover_interrupted_ingestions"
+                            ) as recover:
+                                with self.assertLogs("app.main", level="INFO") as logs:
+                                    with TestClient(app):
+                                        pass
+        initialize_database.assert_called_once_with()
         initialize.assert_not_called()
         get_model.assert_not_called()
         recover.assert_called_once_with()

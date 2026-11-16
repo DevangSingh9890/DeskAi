@@ -6,7 +6,9 @@ from dotenv import dotenv_values, load_dotenv
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 ENV_FILE = BACKEND_DIR / ".env"
+PROJECT_ENV_FILE = BACKEND_DIR.parent / ".env.local"
 load_dotenv(dotenv_path=ENV_FILE)
+load_dotenv(dotenv_path=PROJECT_ENV_FILE)
 
 
 def _read_setting(name: str, default: str = "") -> str:
@@ -14,14 +16,19 @@ def _read_setting(name: str, default: str = "") -> str:
     if value:
         return value
 
-    dotenv_value = (dotenv_values(ENV_FILE).get(name) or "").strip()
-    return dotenv_value or default
+    for env_file in (ENV_FILE, PROJECT_ENV_FILE):
+        dotenv_value = (dotenv_values(env_file).get(name) or "").strip()
+        if dotenv_value:
+            return dotenv_value
+    return default
 
 
 @dataclass(frozen=True)
 class Settings:
     APP_ENV: str
     GROQ_API_KEY: str
+    DATABASE_URL: str
+    DATABASE_URL_UNPOOLED: str
     GROQ_MODEL: str
     GROQ_CA_BUNDLE: str
     ADMIN_API_KEY: str
@@ -43,6 +50,8 @@ if not _configured_chroma_directory.is_absolute():
 settings = Settings(
     APP_ENV=_read_setting("APP_ENV", "production").lower(),
     GROQ_API_KEY=_read_setting("GROQ_API_KEY"),
+    DATABASE_URL=_read_setting("DATABASE_URL"),
+    DATABASE_URL_UNPOOLED=_read_setting("DATABASE_URL_UNPOOLED"),
     GROQ_MODEL=_read_setting("GROQ_MODEL", "openai/gpt-oss-20b"),
     GROQ_CA_BUNDLE=_read_setting("GROQ_CA_BUNDLE"),
     ADMIN_API_KEY=_read_setting("ADMIN_API_KEY"),

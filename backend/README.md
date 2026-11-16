@@ -38,12 +38,41 @@ settings are:
 | `SENTENCE_TRANSFORMERS_HOME` | Sentence Transformers default | Optional Sentence Transformers cache directory |
 | `ADMIN_API_KEY` | unset | Required to enable the protected model warm-up endpoint |
 | `APP_ENV` | `production` | Use `development` for detailed agent validation errors |
+| `DATABASE_URL` | unset | Neon pooled PostgreSQL connection URL |
+| `DATABASE_URL_UNPOOLED` | unset | Neon direct PostgreSQL connection URL for migrations and session-bound work |
 
 No OpenAI embedding key or Hugging Face key is used. The API starts without
 loading the embedding model; it is loaded once per backend process on the first
 document-ingestion or semantic-search request and reused afterward. The first
 RAG request may take longer while the model is loaded or downloaded.
 Existing comma-separated `CORS_ORIGINS` configuration is unchanged.
+
+Ticket records and pending ticket approvals are persisted in PostgreSQL.
+Runtime requests use the pooled `DATABASE_URL`; Alembic uses
+`DATABASE_URL_UNPOOLED` for schema migrations. Backend startup creates missing
+tables without dropping or resetting existing tables. Keep Alembic migrations
+as the source of truth when evolving the schema.
+
+Run migrations from the `backend` directory:
+
+```powershell
+.\.venv\Scripts\alembic.exe -c alembic.ini upgrade head
+.\.venv\Scripts\alembic.exe -c alembic.ini current
+```
+
+Create future revisions with:
+
+```powershell
+.\.venv\Scripts\alembic.exe -c alembic.ini revision --autogenerate -m "describe schema change"
+```
+
+The initial migration creates `tickets` and `ticket_approvals`. The application
+also provides `GET /api/admin/tickets`, `GET /api/admin/tickets/{ticket_id}`,
+`PUT /api/admin/tickets/{ticket_id}`, and `GET /api/admin/analytics`.
+Neon CLI setup stores these connection URLs in the repository-root `.env.local`;
+backend settings load that file as well as `backend/.env`. The backend exposes
+the URLs through `settings.DATABASE_URL` and `settings.DATABASE_URL_UNPOOLED`.
+Ticket storage remains in-memory until a database repository is implemented.
 
 ## Embedding model cache and warm-up
 
