@@ -340,7 +340,7 @@ class RagRouteTests(unittest.TestCase):
         constructor.assert_called_once()
         self.assertTrue(all(model is models[0] for model in models))
         self.assertIn(
-            "Loading embedding model for first time",
+            "Loading embedding model...",
             "\n".join(logs.output),
         )
         self.assertIn("Embedding model loaded successfully", "\n".join(logs.output))

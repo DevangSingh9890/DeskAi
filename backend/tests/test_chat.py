@@ -143,7 +143,9 @@ class ChatRouteTests(unittest.TestCase):
                 with patch(
                     "app.services.rag_service.initialize_embedding_service"
                 ) as initialize:
-                    with patch("app.main.start_background_embedding_warmup") as start:
+                    with patch(
+                        "app.services.rag_service.start_background_embedding_warmup"
+                    ) as start:
                         with patch(
                             "app.services.rag_service.EmbeddingService.get_model"
                         ) as get_model:
@@ -157,7 +159,7 @@ class ChatRouteTests(unittest.TestCase):
         initialize.assert_not_called()
         get_model.assert_not_called()
         recover.assert_called_once_with()
-        start.assert_called_once_with(delay_seconds=3.0)
+        start.assert_not_called()
 
         self.assertIn("Backend started", "\n".join(logs.output))
         self.assertIn("Backend startup complete", "\n".join(logs.output))

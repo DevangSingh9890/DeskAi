@@ -16,7 +16,6 @@ from app.services.file_service import ensure_uploads_dir
 from app.services.rag_service import (
     is_embedding_model_loaded,
     recover_interrupted_ingestions,
-    start_background_embedding_warmup,
 )
 
 logging.basicConfig(
@@ -45,8 +44,6 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Backend started")
     logger.info("Backend startup complete")
     logger.info("Embedding model not loaded yet")
-    # Give Uvicorn time to bind and answer readiness probes before ML imports.
-    start_background_embedding_warmup(delay_seconds=3.0)
     yield
 
 

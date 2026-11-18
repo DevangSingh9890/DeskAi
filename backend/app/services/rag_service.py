@@ -107,10 +107,7 @@ class EmbeddingService:
 
             cls._load_attempted = True
             load_started = perf_counter()
-            logger.info(
-                "Loading embedding model for first time model=%s",
-                settings.EMBEDDING_MODEL,
-            )
+            logger.info("Loading embedding model...")
             try:
                 model_path, cache_directory, source = _resolve_embedding_model_source(
                     settings.EMBEDDING_MODEL
@@ -148,8 +145,7 @@ class EmbeddingService:
                 ) from exc
 
             logger.info(
-                "Embedding model loaded successfully model=%s",
-                settings.EMBEDDING_MODEL,
+                "Embedding model loaded successfully"
             )
             logger.info(
                 "Model load time: %.3f seconds", perf_counter() - load_started
