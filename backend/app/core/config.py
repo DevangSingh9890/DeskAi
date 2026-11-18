@@ -40,7 +40,12 @@ class Settings:
 
 
 _default_origins = ("http://localhost:5173", "http://127.0.0.1:5173")
-_configured_origins = _read_setting("CORS_ORIGINS")
+_configured_origins = tuple(
+    origin.strip().rstrip("/")
+    for origin in _read_setting("CORS_ORIGINS").split(",")
+    if origin.strip()
+)
+_cors_origins = tuple(dict.fromkeys((*_default_origins, *_configured_origins)))
 _configured_chroma_directory = Path(
     _read_setting("CHROMA_PERSIST_DIRECTORY", "./chroma_db")
 ).expanduser()
@@ -48,7 +53,7 @@ if not _configured_chroma_directory.is_absolute():
     _configured_chroma_directory = BACKEND_DIR / _configured_chroma_directory
 
 settings = Settings(
-    APP_ENV=_read_setting("APP_ENV", "production").lower(),
+    APP_ENV=_read_setting("APP_ENV", "development").lower(),
     GROQ_API_KEY=_read_setting("GROQ_API_KEY"),
     DATABASE_URL=_read_setting("DATABASE_URL"),
     DATABASE_URL_UNPOOLED=_read_setting("DATABASE_URL_UNPOOLED"),
@@ -63,10 +68,5 @@ settings = Settings(
         "CHROMA_COLLECTION_NAME", "deskai_knowledge"
     ),
     RAG_RELEVANCE_THRESHOLD=float(_read_setting("RAG_RELEVANCE_THRESHOLD", "0.35")),
-    CORS_ORIGINS=tuple(
-        origin.strip().rstrip("/")
-        for origin in _configured_origins.split(",")
-        if origin.strip()
-    )
-    or _default_origins,
+    CORS_ORIGINS=_cors_origins,
 )

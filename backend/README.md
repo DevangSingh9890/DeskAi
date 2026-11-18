@@ -22,10 +22,8 @@ python -m pip install -r requirements.txt
 ```
 
 Copy `.env.example` to `.env` and set `GROQ_API_KEY`. The default Groq model is
-`openai/gpt-oss-20b`. Set `APP_ENV=development` locally to include agent
-validation details in failed chat responses; the default is `production`, which
-keeps client errors generic while full exceptions are logged server-side. RAG
-settings are:
+`openai/gpt-oss-20b`. `APP_ENV` defaults to `development`; set it to `production`
+only when generic client errors are desired. RAG settings are:
 
 | Variable | Default | Description |
 | --- | --- | --- |
@@ -37,7 +35,7 @@ settings are:
 | `TRANSFORMERS_CACHE` | Hugging Face default | Optional Transformers cache directory |
 | `SENTENCE_TRANSFORMERS_HOME` | Sentence Transformers default | Optional Sentence Transformers cache directory |
 | `ADMIN_API_KEY` | unset | Required to enable the protected model warm-up endpoint |
-| `APP_ENV` | `production` | Use `development` for detailed agent validation errors |
+| `APP_ENV` | `development` | Use `production` for generic agent validation errors |
 | `DATABASE_URL` | unset | Neon pooled PostgreSQL connection URL |
 | `DATABASE_URL_UNPOOLED` | unset | Neon direct PostgreSQL connection URL for migrations and session-bound work |
 
@@ -95,25 +93,22 @@ directory precedence is `HF_HUB_CACHE`, `SENTENCE_TRANSFORMERS_HOME`,
 `TRANSFORMERS_CACHE`, then `HF_HOME/hub`; without these settings, the Hugging
 Face default cache is used.
 
-Pre-download the model during image or deployment preparation, rather than
-making production requests wait for a network download:
+To pre-download the model before the first local indexing or search request:
 
 ```powershell
 python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='sentence-transformers/all-MiniLM-L6-v2', local_dir='models/all-MiniLM-L6-v2')"
 ```
 
 Then set `EMBEDDING_MODEL=./models/all-MiniLM-L6-v2`. The local model path is
-resolved relative to the backend directory. Mount that directory read-only in
-production. To prohibit Hub network access, set `HF_HUB_OFFLINE=1`; the backend
-will fail explicitly if the local model files are missing.
+resolved relative to the backend directory. To prohibit Hub network access, set
+`HF_HUB_OFFLINE=1`; the backend will fail explicitly if the local model files
+are missing.
 
-Backend startup launches a daemon thread that loads the model and runs a sample
-embedding. Startup does not wait for this work. The performance endpoint and UI
-report whether the RAG engine is warming, ready, or unavailable. The UI keeps
-uploads enabled while warming; uploaded files are queued and indexed when
-warm-up finishes.
+Backend startup does not load the embedding model. The first document-indexing
+or semantic-search operation loads it once, and subsequent operations reuse it.
+The performance endpoint reports whether the model has loaded.
 
-To explicitly run or verify warm-up after deployment, set a private
+To explicitly run or verify warm-up locally, set a private
 `ADMIN_API_KEY` and call the protected endpoint:
 
 ```powershell
@@ -133,17 +128,15 @@ certificate file path (for example, `C:/certs/corporate-root-ca.pem`). Restart
 the backend after changing the trust store or `.env`. Do not disable
 certificate verification.
 
-Run the API from the `backend` directory:
+Run the API from the `backend` directory with the backend virtual environment
+active:
 
 ```powershell
-python -m uvicorn app.main:app --reload --reload-dir app
+uvicorn app.main:app --reload
 ```
 
-Run this after activating the virtual environment above so Uvicorn uses the
-same Python interpreter where `requirements.txt` was installed.
-
-The API is available at `http://127.0.0.1:8000`. Interactive API documentation
-is at `http://127.0.0.1:8000/docs`.
+The API is available at `http://localhost:8000`. Interactive API documentation
+is at `http://localhost:8000/docs`.
 
 ## Endpoints
 

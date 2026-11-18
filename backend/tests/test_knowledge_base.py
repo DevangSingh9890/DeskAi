@@ -6,6 +6,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.services import file_service
 from app.services.rag_service import recover_interrupted_ingestions
 
 
@@ -16,6 +17,7 @@ class KnowledgeBaseRouteTests(unittest.TestCase):
             "app.services.file_service.UPLOADS_DIR",
             Path(self.temporary_directory.name) / "uploads",
         )
+        self.uploads_dir = Path(self.temporary_directory.name) / "uploads"
         self.uploads_patch.start()
         self.worker_patch = patch("app.routes.knowledge_base.process_document_ingestion")
         self.worker_mock = self.worker_patch.start()
@@ -118,6 +120,30 @@ class KnowledgeBaseRouteTests(unittest.TestCase):
         self.assertEqual(response.json()["status"], "failed")
         self.assertEqual(response.json()["stage"], "queued")
         self.assertIn("backend restart", response.json()["error"])
+
+    def test_missing_stored_file_does_not_block_recovery_of_other_documents(
+        self,
+    ) -> None:
+        missing_file_upload = self.client.post(
+            "/api/documents/upload",
+            files={"file": ("missing.txt", b"document content")},
+        )
+        pending_upload = self.client.post(
+            "/api/documents/upload",
+            files={"file": ("pending.txt", b"document content")},
+        )
+        missing_id = missing_file_upload.json()["document_id"]
+        pending_id = pending_upload.json()["document_id"]
+        (self.uploads_dir / f"{missing_id}.txt").unlink()
+
+        with self.assertLogs(file_service.logger, level="WARNING") as logs:
+            recover_interrupted_ingestions()
+
+        self.assertIn("Skipping orphan document metadata", "\n".join(logs.output))
+        pending_status = self.client.get(f"/api/documents/{pending_id}/status")
+        self.assertEqual(pending_status.json()["status"], "failed")
+        listed_documents = self.client.get("/api/documents").json()
+        self.assertEqual([document["id"] for document in listed_documents], [pending_id])
 
     def test_upload_accepts_docx_and_txt(self) -> None:
         for filename in ("guide.docx", "notes.txt"):

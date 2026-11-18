@@ -185,8 +185,11 @@ def list_documents() -> list[DocumentSummary]:
         for metadata_path in UPLOADS_DIR.glob("*.json"):
             document = _read_document(metadata_path)
             if not _document_path(document).is_file():
-                logger.error("Stored document file is missing: id=%s", document.id)
-                raise DocumentStorageError("A stored document file is missing.")
+                logger.warning(
+                    "Skipping orphan document metadata; stored file is missing id=%s",
+                    document.id,
+                )
+                continue
             documents.append(
                 DocumentSummary(
                     id=document.id,

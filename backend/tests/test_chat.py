@@ -334,20 +334,22 @@ class ChatRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 502)
         generate_response_mock.assert_called_once()
 
-    def test_chat_allows_frontend_cors_origin(self) -> None:
-        response = self.client.options(
-            "/api/chat",
-            headers={
-                "Origin": "http://localhost:5173",
-                "Access-Control-Request-Method": "POST",
-            },
-        )
+    def test_chat_allows_both_local_frontend_origins(self) -> None:
+        for origin in ("http://localhost:5173", "http://127.0.0.1:5173"):
+            with self.subTest(origin=origin):
+                response = self.client.options(
+                    "/api/chat",
+                    headers={
+                        "Origin": origin,
+                        "Access-Control-Request-Method": "POST",
+                    },
+                )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.headers["access-control-allow-origin"],
-            "http://localhost:5173",
-        )
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    response.headers["access-control-allow-origin"],
+                    origin,
+                )
 
 
 class GroqServiceTests(unittest.TestCase):
