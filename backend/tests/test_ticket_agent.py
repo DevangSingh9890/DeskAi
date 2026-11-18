@@ -47,6 +47,9 @@ class TicketAgentTests(unittest.TestCase):
         request_approval.assert_called_once_with(
             self.state["user_message"],
             self.state["classification"],
+            knowledge_sources=[],
+            similar_incidents=[],
+            ai_recommendation="The work-blocking incident should be tracked.",
         )
         create_ticket.assert_not_called()
         self.assertEqual(
@@ -83,6 +86,11 @@ class TicketAgentTests(unittest.TestCase):
         request_approval.assert_called_once_with(
             self.state["user_message"],
             self.state["classification"],
+            knowledge_sources=[],
+            similar_incidents=[],
+            ai_recommendation=(
+                "You asked to create a ticket. Review the incident details and approve to create it."
+            ),
         )
         create_ticket.assert_not_called()
         self.assertTrue(result["ticket_recommendation"]["ticket_recommended"])
@@ -205,6 +213,18 @@ class TicketAgentTests(unittest.TestCase):
                 '{"action": "check_ticket_status", '
                 '"reason": "The user asked for the current status.", '
                 '"ticket_id": "INC-99999"}'
+            ),
+        ), patch(
+            "app.agents.ticket_agent.get_ticket_status_tool",
+            new=Mock(
+                invoke=Mock(
+                    return_value={
+                        "ticket_id": "INC-99999",
+                        "status": "Not found",
+                        "assigned_group": None,
+                        "updated_at": None,
+                    }
+                )
             ),
         ):
             result = ticket_agent(self.state)

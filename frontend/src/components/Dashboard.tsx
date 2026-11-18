@@ -72,6 +72,11 @@ function getTicketDetails(message: ChatMessage): TicketCreateRequest | undefined
     subcategory: classification.subcategory,
     assigned_group: classification.assigned_group,
     created_by: 'user',
+    impact: classification.impact ?? undefined,
+    ai_recommendation:
+      message.agentResponse?.ticket_recommendation?.reason ?? undefined,
+    knowledge_sources: message.agentResponse?.knowledge_sources ?? [],
+    similar_incidents: message.agentResponse?.similar_tickets ?? [],
   }
 }
 

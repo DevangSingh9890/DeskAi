@@ -1,6 +1,6 @@
 import unittest
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
@@ -19,6 +19,14 @@ from app.services.ticket_service import (
 )
 
 
+def enforce_sqlite_foreign_keys(engine) -> None:
+    @event.listens_for(engine, "connect")
+    def enable_foreign_keys(connection, _record) -> None:
+        cursor = connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+
 class TicketServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.engine = create_engine(
@@ -26,6 +34,7 @@ class TicketServiceTests(unittest.TestCase):
             connect_args={"check_same_thread": False},
             poolclass=StaticPool,
         )
+        enforce_sqlite_foreign_keys(self.engine)
         self.session_factory = sessionmaker(
             bind=self.engine,
             autoflush=False,
@@ -69,6 +78,29 @@ class TicketServiceTests(unittest.TestCase):
         self.assertEqual(ticket.title, "VPN connection failure")
         self.assertEqual(ticket.status, "Open")
         self.assertEqual(self.service.list_tickets(), [ticket])
+
+    def test_approval_persists_ai_context_on_created_ticket(self) -> None:
+        incident = {
+            "ticket_id": "INC-10020",
+            "category": "Network",
+            "priority": "High",
+            "summary": "VPN login failure",
+            "resolution": "Reset the client profile.",
+        }
+        approval_id = self.service.request_ticket_approval(
+            self.message,
+            {**self.classification, "impact": "Multiple Users"},
+            knowledge_sources=["vpn-guide.pdf"],
+            similar_incidents=[incident],
+            ai_recommendation="Reset the VPN profile and retry.",
+        )
+
+        ticket = self.service.approve_ticket(approval_id, self.message)
+
+        self.assertEqual(ticket.impact, "Multiple Users")
+        self.assertEqual(ticket.ai_recommendation, "Reset the VPN profile and retry.")
+        self.assertEqual(ticket.knowledge_sources, ["vpn-guide.pdf"])
+        self.assertEqual(ticket.similar_incidents, [incident])
 
     def test_rejected_recommendation_does_not_create_ticket(self) -> None:
         approval_id = self.service.request_ticket_approval(
@@ -154,6 +186,7 @@ class TicketApiTests(unittest.TestCase):
             connect_args={"check_same_thread": False},
             poolclass=StaticPool,
         )
+        enforce_sqlite_foreign_keys(self.engine)
         self.session_factory = sessionmaker(
             bind=self.engine,
             autoflush=False,
@@ -335,6 +368,90 @@ class TicketApiTests(unittest.TestCase):
         self.assertEqual(updated.json()["status"], "Resolved")
         self.assertEqual(analytics.json()["total_tickets"], 1)
         self.assertEqual(analytics.json()["resolved_tickets"], 1)
+
+    def test_admin_operations_persist_comments_history_and_assignment(self) -> None:
+        created = self.client.post(
+            "/api/tickets",
+            json={
+                "title": "Email access failure",
+                "description": "Cannot access the service mailbox.",
+                "priority": "High",
+                "category": "Email",
+                "subcategory": "Mailbox access",
+                "assigned_group": "Email Support",
+                "knowledge_sources": ["mailbox-guide.pdf"],
+                "ai_recommendation": "Check the account and mailbox permissions.",
+            },
+        )
+        self.assertEqual(created.status_code, 201)
+        ticket_id = created.json()["ticket_id"]
+
+        page = self.client.get(
+            "/api/admin/tickets",
+            params={"search": "mailbox", "page": 1, "page_size": 1},
+        )
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(page.json()["total"], 1)
+        self.assertEqual(page.json()["items"][0]["ticket_id"], ticket_id)
+
+        status_response = self.client.put(
+            f"/api/admin/tickets/{ticket_id}/status",
+            json={"status": "In Progress"},
+        )
+        assignment_response = self.client.put(
+            f"/api/admin/tickets/{ticket_id}/assign",
+            json={"assigned_group": "Identity & Access Management"},
+        )
+        comment_response = self.client.post(
+            f"/api/admin/tickets/{ticket_id}/comments",
+            json={"body": "Account access is being investigated."},
+        )
+
+        self.assertEqual(status_response.status_code, 200)
+        self.assertEqual(assignment_response.status_code, 200)
+        self.assertEqual(comment_response.status_code, 201)
+        details = self.client.get(f"/api/admin/tickets/{ticket_id}")
+        comments = self.client.get(f"/api/admin/tickets/{ticket_id}/comments")
+        self.assertEqual(details.status_code, 200)
+        self.assertEqual(details.json()["status"], "In Progress")
+        self.assertEqual(
+            details.json()["assigned_group"],
+            "Identity & Access Management",
+        )
+        self.assertEqual(details.json()["knowledge_sources"], ["mailbox-guide.pdf"])
+        self.assertEqual(details.json()["comments"][0]["body"], "Account access is being investigated.")
+        self.assertEqual(comments.json()[0]["body"], "Account access is being investigated.")
+        self.assertEqual(
+            {entry["event_type"] for entry in details.json()["history"]},
+            {"ticket_created", "status_changed", "assignment_changed", "comment_added"},
+        )
+
+        dashboard = self.client.get("/api/admin/dashboard")
+        analytics = self.client.get("/api/admin/analytics")
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertEqual(dashboard.json()["total_tickets"], 1)
+        self.assertEqual(analytics.status_code, 200)
+        self.assertEqual(analytics.json()["ticket_categories"][0]["name"], "Email")
+        self.assertEqual(analytics.json()["tickets_created_by_day"][-1]["count"], 1)
+
+    def test_admin_assignment_rejects_unsupported_group(self) -> None:
+        created = self.client.post(
+            "/api/tickets",
+            json={
+                "title": "Laptop failure",
+                "description": "Laptop will not start.",
+                "priority": "Medium",
+                "category": "Hardware",
+                "subcategory": "Power",
+                "assigned_group": "Hardware Support",
+            },
+        )
+        ticket_id = created.json()["ticket_id"]
+        response = self.client.put(
+            f"/api/admin/tickets/{ticket_id}/assign",
+            json={"assigned_group": "Unknown Team"},
+        )
+        self.assertEqual(response.status_code, 422)
 
 
 if __name__ == "__main__":

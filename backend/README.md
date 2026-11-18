@@ -66,13 +66,24 @@ Create future revisions with:
 .\.venv\Scripts\alembic.exe -c alembic.ini revision --autogenerate -m "describe schema change"
 ```
 
-The initial migration creates `tickets` and `ticket_approvals`. The application
-also provides `GET /api/admin/tickets`, `GET /api/admin/tickets/{ticket_id}`,
-`PUT /api/admin/tickets/{ticket_id}`, and `GET /api/admin/analytics`.
+Migration `0001_ticket_persistence` creates `tickets` and `ticket_approvals`.
+Migration `0002_admin_ticket_operations` adds ticket detail metadata, comments,
+and an audit trail (including initial history entries for existing tickets).
+Migration `0003_ticket_cols_fix` repairs metadata columns if the database was
+marked at revision `0002` without those columns.
+Apply migrations before starting a deployment with an existing database.
+
+The admin API provides dashboard metrics, searchable/filterable/sortable and
+paginated ticket lists, ticket details, status and assignment updates, comments,
+and ticket analytics under `/api/admin`. Admin updates, comments, and their
+history are persisted in PostgreSQL. Approved AI recommendations also retain
+the recommendation, impact, knowledge sources, and related incidents on the
+ticket record.
+
+The frontend uses Recharts for its Ticket Center analytics.
 Neon CLI setup stores these connection URLs in the repository-root `.env.local`;
 backend settings load that file as well as `backend/.env`. The backend exposes
 the URLs through `settings.DATABASE_URL` and `settings.DATABASE_URL_UNPOOLED`.
-Ticket storage remains in-memory until a database repository is implemented.
 
 ## Embedding model cache and warm-up
 

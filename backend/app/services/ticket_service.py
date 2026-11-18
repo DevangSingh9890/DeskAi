@@ -6,8 +6,10 @@ from typing import Any
 
 from app.database.session import SessionLocal
 from app.models.ticket import (
+    AdminTicketDetail,
     SimilarTicket,
     Ticket,
+    TicketComment,
     TicketCreateRequest,
     TicketStatusResponse,
     TicketUpdateRequest,
@@ -45,23 +47,77 @@ class TicketService:
     def list_tickets(self) -> list[Ticket]:
         return self._repository.list_tickets()
 
+    def list_admin_tickets(
+        self,
+        *,
+        search: str | None,
+        ticket_status: str | None,
+        priority: str | None,
+        assignment_group: str | None,
+        sort_by: str,
+        sort_order: str,
+        page: int,
+        page_size: int,
+    ) -> dict[str, Any]:
+        return self._repository.list_admin_tickets(
+            search=search,
+            ticket_status=ticket_status,
+            priority=priority,
+            assignment_group=assignment_group,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            page=page,
+            page_size=page_size,
+        )
+
+    def get_admin_ticket(self, ticket_id: str) -> AdminTicketDetail:
+        ticket = self._repository.get_admin_details(ticket_id)
+        if ticket is None:
+            raise TicketNotFoundError(f"Ticket {ticket_id} was not found.")
+        return ticket
+
     def update_ticket(
-        self, ticket_id: str, request: TicketUpdateRequest
+        self,
+        ticket_id: str,
+        request: TicketUpdateRequest,
+        *,
+        actor: str = "System",
     ) -> Ticket:
         changes = request.model_dump(exclude_unset=True)
         if not changes:
             raise ValueError("At least one ticket field must be provided.")
-        ticket = self._repository.update(ticket_id, changes)
+        ticket = self._repository.update(ticket_id, changes, actor=actor)
         if ticket is None:
             raise TicketNotFoundError(f"Ticket {ticket_id} was not found.")
         logger.info("Ticket Updated ticket_id=%s", ticket.ticket_id)
         return ticket
 
-    def assign_ticket(self, ticket_id: str, assigned_group: str) -> Ticket:
+    def assign_ticket(
+        self,
+        ticket_id: str,
+        assigned_group: str,
+        *,
+        actor: str = "System",
+    ) -> Ticket:
         return self.update_ticket(
             ticket_id,
             TicketUpdateRequest(assigned_group=assigned_group),
+            actor=actor,
         )
+
+    def list_ticket_comments(self, ticket_id: str) -> list[TicketComment]:
+        comments = self._repository.list_comments(ticket_id)
+        if comments is None:
+            raise TicketNotFoundError(f"Ticket {ticket_id} was not found.")
+        return comments
+
+    def add_ticket_comment(
+        self, ticket_id: str, body: str, author: str
+    ) -> TicketComment:
+        comment = self._repository.add_comment(ticket_id, body, author)
+        if comment is None:
+            raise TicketNotFoundError(f"Ticket {ticket_id} was not found.")
+        return comment
 
     def get_ticket_status(self, ticket_id: str) -> TicketStatusResponse:
         ticket = self.get_ticket(ticket_id)
@@ -90,7 +146,13 @@ class TicketService:
         )
 
     def request_ticket_approval(
-        self, message: str, classification: Mapping[str, object]
+        self,
+        message: str,
+        classification: Mapping[str, object],
+        *,
+        knowledge_sources: list[str] | None = None,
+        similar_incidents: list[dict[str, Any]] | None = None,
+        ai_recommendation: str | None = None,
     ) -> str:
         request = TicketCreateRequest(
             title=str(classification["issue"]),
@@ -100,6 +162,14 @@ class TicketService:
             subcategory=str(classification["subcategory"]),
             assigned_group=str(classification["assigned_group"]),
             created_by="user",
+            impact=(
+                str(classification["impact"])
+                if classification.get("impact") is not None
+                else None
+            ),
+            ai_recommendation=ai_recommendation,
+            knowledge_sources=knowledge_sources or [],
+            similar_incidents=similar_incidents or [],
         )
         approval_id = token_urlsafe(24)
         now = datetime.now(timezone.utc)

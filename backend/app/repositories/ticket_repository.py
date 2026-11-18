@@ -2,7 +2,7 @@ import logging
 import re
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from secrets import token_urlsafe
 from typing import Any
 
@@ -10,11 +10,19 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.database.models import TicketApprovalRecord, TicketRecord
+from app.database.models import (
+    TicketApprovalRecord,
+    TicketCommentRecord,
+    TicketHistoryRecord,
+    TicketRecord,
+)
 from app.models.ticket import (
+    AdminTicketDetail,
     SimilarTicket,
     Ticket,
+    TicketComment,
     TicketCreateRequest,
+    TicketHistory,
     TicketUpdateRequest,
 )
 from app.services.ticket_errors import (
@@ -71,8 +79,75 @@ class TicketRepository:
             ).all()
             return [self._to_ticket(record) for record in records]
 
+    def list_admin_tickets(
+        self,
+        *,
+        search: str | None,
+        ticket_status: str | None,
+        priority: str | None,
+        assignment_group: str | None,
+        sort_by: str,
+        sort_order: str,
+        page: int,
+        page_size: int,
+    ) -> dict[str, Any]:
+        sort_columns = {
+            "ticket_id": TicketRecord.ticket_id,
+            "title": TicketRecord.title,
+            "priority": TicketRecord.priority,
+            "status": TicketRecord.status,
+            "category": TicketRecord.category,
+            "assigned_group": TicketRecord.assigned_group,
+            "created_at": TicketRecord.created_at,
+            "updated_at": TicketRecord.updated_at,
+        }
+        with self._transaction() as session:
+            statement = select(TicketRecord)
+            if search:
+                term = f"%{search.strip()}%"
+                statement = statement.where(
+                    or_(
+                        TicketRecord.ticket_id.ilike(term),
+                        TicketRecord.title.ilike(term),
+                        TicketRecord.description.ilike(term),
+                        TicketRecord.category.ilike(term),
+                        TicketRecord.subcategory.ilike(term),
+                        TicketRecord.assigned_group.ilike(term),
+                    )
+                )
+            if ticket_status:
+                statement = statement.where(TicketRecord.status == ticket_status)
+            if priority:
+                statement = statement.where(TicketRecord.priority == priority)
+            if assignment_group:
+                statement = statement.where(
+                    TicketRecord.assigned_group == assignment_group
+                )
+
+            total = session.scalar(
+                select(func.count()).select_from(statement.subquery())
+            ) or 0
+            sort_column = sort_columns[sort_by]
+            ordering = sort_column.asc() if sort_order == "asc" else sort_column.desc()
+            records = session.scalars(
+                statement.order_by(ordering, TicketRecord.id.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            ).all()
+            return {
+                "items": [self._to_ticket(record) for record in records],
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": (total + page_size - 1) // page_size,
+            }
+
     def update(
-        self, ticket_id: str, changes: Mapping[str, object]
+        self,
+        ticket_id: str,
+        changes: Mapping[str, object],
+        *,
+        actor: str = "System",
     ) -> Ticket | None:
         with self._transaction() as session:
             record = session.scalar(
@@ -81,11 +156,98 @@ class TicketRepository:
             if record is None:
                 return None
 
+            if "status" in changes and changes["status"] != record.status:
+                session.add(
+                    TicketHistoryRecord(
+                        ticket_id=ticket_id,
+                        event_type="status_changed",
+                        old_value=record.status,
+                        new_value=str(changes["status"]),
+                        actor=actor,
+                    )
+                )
+            if (
+                "assigned_group" in changes
+                and changes["assigned_group"] != record.assigned_group
+            ):
+                session.add(
+                    TicketHistoryRecord(
+                        ticket_id=ticket_id,
+                        event_type="assignment_changed",
+                        old_value=record.assigned_group,
+                        new_value=str(changes["assigned_group"]),
+                        actor=actor,
+                    )
+                )
             for field, value in changes.items():
                 setattr(record, field, value)
             record.updated_at = datetime.now(timezone.utc)
             session.flush()
             return self._to_ticket(record)
+
+    def get_admin_details(self, ticket_id: str) -> AdminTicketDetail | None:
+        with self._transaction() as session:
+            record = session.scalar(
+                select(TicketRecord).where(TicketRecord.ticket_id == ticket_id)
+            )
+            if record is None:
+                return None
+            comments = session.scalars(
+                select(TicketCommentRecord)
+                .where(TicketCommentRecord.ticket_id == ticket_id)
+                .order_by(TicketCommentRecord.created_at, TicketCommentRecord.id)
+            ).all()
+            history = session.scalars(
+                select(TicketHistoryRecord)
+                .where(TicketHistoryRecord.ticket_id == ticket_id)
+                .order_by(TicketHistoryRecord.created_at, TicketHistoryRecord.id)
+            ).all()
+            return AdminTicketDetail(
+                **self._to_ticket(record).model_dump(),
+                comments=[self._to_comment(item) for item in comments],
+                history=[self._to_history(item) for item in history],
+            )
+
+    def list_comments(self, ticket_id: str) -> list[TicketComment] | None:
+        with self._transaction() as session:
+            exists = session.scalar(
+                select(TicketRecord.id).where(TicketRecord.ticket_id == ticket_id)
+            )
+            if exists is None:
+                return None
+            comments = session.scalars(
+                select(TicketCommentRecord)
+                .where(TicketCommentRecord.ticket_id == ticket_id)
+                .order_by(TicketCommentRecord.created_at, TicketCommentRecord.id)
+            ).all()
+            return [self._to_comment(item) for item in comments]
+
+    def add_comment(
+        self, ticket_id: str, body: str, author: str
+    ) -> TicketComment | None:
+        with self._transaction() as session:
+            ticket = session.scalar(
+                select(TicketRecord).where(TicketRecord.ticket_id == ticket_id)
+            )
+            if ticket is None:
+                return None
+            ticket.updated_at = datetime.now(timezone.utc)
+            comment = TicketCommentRecord(
+                ticket_id=ticket_id,
+                body=body,
+                author=author,
+            )
+            session.add(comment)
+            session.add(
+                TicketHistoryRecord(
+                    ticket_id=ticket_id,
+                    event_type="comment_added",
+                    new_value="Comment added",
+                    actor=author,
+                )
+            )
+            session.flush()
+            return self._to_comment(comment)
 
     def search_similar(
         self,
@@ -199,6 +361,37 @@ class TicketRepository:
                     .group_by(TicketRecord.priority)
                 ).all()
             )
+            category_counts = dict(
+                session.execute(
+                    select(TicketRecord.category, func.count())
+                    .group_by(TicketRecord.category)
+                ).all()
+            )
+            assignment_counts = dict(
+                session.execute(
+                    select(TicketRecord.assigned_group, func.count())
+                    .group_by(TicketRecord.assigned_group)
+                ).all()
+            )
+            today = datetime.now(timezone.utc).date()
+            start_day = today - timedelta(days=6)
+            daily_counts = {
+                str(day): count
+                for day, count in session.execute(
+                    select(func.date(TicketRecord.created_at), func.count())
+                    .where(TicketRecord.created_at >= start_day)
+                    .group_by(func.date(TicketRecord.created_at))
+                ).all()
+            }
+            tickets_created_by_day = [
+                {
+                    "date": (start_day + timedelta(days=offset)).isoformat(),
+                    "count": daily_counts.get(
+                        (start_day + timedelta(days=offset)).isoformat(), 0
+                    ),
+                }
+                for offset in range(7)
+            ]
             return {
                 "total_tickets": total,
                 "open_tickets": status_counts.get("Open", 0)
@@ -208,6 +401,23 @@ class TicketRepository:
                 + priority_counts.get("Critical", 0),
                 "by_status": status_counts,
                 "by_priority": priority_counts,
+                "ticket_categories": [
+                    {"name": name, "count": count}
+                    for name, count in category_counts.items()
+                ],
+                "priority_distribution": [
+                    {"name": name, "count": count}
+                    for name, count in priority_counts.items()
+                ],
+                "status_distribution": [
+                    {"name": name, "count": count}
+                    for name, count in status_counts.items()
+                ],
+                "tickets_created_by_day": tickets_created_by_day,
+                "assigned_group_distribution": [
+                    {"name": name, "count": count}
+                    for name, count in assignment_counts.items()
+                ],
             }
 
     @staticmethod
@@ -222,10 +432,33 @@ class TicketRepository:
             status="Open",
             assigned_group=request.assigned_group,
             created_by=request.created_by,
+            impact=request.impact or TicketRepository._impact_for_priority(
+                request.priority
+            ),
+            ai_recommendation=request.ai_recommendation,
+            knowledge_sources=request.knowledge_sources,
+            similar_incidents=request.similar_incidents,
         )
         session.add(record)
         session.flush()
         record.ticket_id = f"INC-{record.id + 10000:05d}"
+        session.flush()
+        session.add(
+            TicketHistoryRecord(
+                ticket_id=record.ticket_id,
+                event_type="ticket_created",
+                new_value=record.title,
+                actor=record.created_by,
+            )
+        )
+        session.add(
+            TicketHistoryRecord(
+                ticket_id=record.ticket_id,
+                event_type="assignment_changed",
+                new_value=record.assigned_group,
+                actor=record.created_by,
+            )
+        )
         session.flush()
         return TicketRepository._to_ticket(record)
 
@@ -282,4 +515,41 @@ class TicketRepository:
             updated_at=record.updated_at,
             created_by=record.created_by,
             resolution=record.resolution,
+            impact=record.impact or TicketRepository._impact_for_priority(
+                record.priority
+            ),
+            ai_recommendation=record.ai_recommendation,
+            knowledge_sources=record.knowledge_sources or [],
+            similar_incidents=record.similar_incidents or [],
+        )
+
+    @staticmethod
+    def _impact_for_priority(priority: str) -> str:
+        return {
+            "Critical": "High",
+            "High": "High",
+            "Medium": "Medium",
+            "Low": "Low",
+        }.get(priority, "Medium")
+
+    @staticmethod
+    def _to_comment(record: TicketCommentRecord) -> TicketComment:
+        return TicketComment(
+            id=record.id,
+            ticket_id=record.ticket_id,
+            author=record.author,
+            body=record.body,
+            created_at=record.created_at,
+        )
+
+    @staticmethod
+    def _to_history(record: TicketHistoryRecord) -> TicketHistory:
+        return TicketHistory(
+            id=record.id,
+            ticket_id=record.ticket_id,
+            event_type=record.event_type,
+            old_value=record.old_value,
+            new_value=record.new_value,
+            actor=record.actor,
+            created_at=record.created_at,
         )

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Index, Integer, JSON, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, JSON, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.database import Base
@@ -40,6 +40,48 @@ class TicketRecord(Base):
         onupdate=func.now(),
     )
     resolution: Mapped[str | None] = mapped_column(Text, nullable=True)
+    impact: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    ai_recommendation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    knowledge_sources: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    similar_incidents: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSON, nullable=True
+    )
+
+
+class TicketCommentRecord(Base):
+    __tablename__ = "ticket_comments"
+    __table_args__ = (
+        Index("ix_ticket_comments_ticket_created", "ticket_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ticket_id: Mapped[str] = mapped_column(
+        ForeignKey("tickets.ticket_id", ondelete="CASCADE"), nullable=False
+    )
+    author: Mapped[str] = mapped_column(String(150), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class TicketHistoryRecord(Base):
+    __tablename__ = "ticket_history"
+    __table_args__ = (
+        Index("ix_ticket_history_ticket_created", "ticket_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ticket_id: Mapped[str] = mapped_column(
+        ForeignKey("tickets.ticket_id", ondelete="CASCADE"), nullable=False
+    )
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    actor: Mapped[str] = mapped_column(String(150), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class TicketApprovalRecord(Base):

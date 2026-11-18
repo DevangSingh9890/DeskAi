@@ -84,6 +84,9 @@ def _create_ticket_recommendation(
     message: str,
     classification: dict[str, Any],
     reason: str,
+    *,
+    knowledge_sources: list[str] | None = None,
+    similar_incidents: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     required_fields = (
         "issue",
@@ -116,7 +119,13 @@ def _create_ticket_recommendation(
         )
         return {"ticket_recommendation": recommendation.model_dump()}
 
-    approval_id = ticket_service.request_ticket_approval(message, classification)
+    approval_id = ticket_service.request_ticket_approval(
+        message,
+        classification,
+        knowledge_sources=knowledge_sources,
+        similar_incidents=similar_incidents,
+        ai_recommendation=reason,
+    )
     recommendation = TicketRecommendation(
         action="create_ticket",
         ticket_recommended=True,
@@ -136,6 +145,8 @@ def ticket_agent(state: ServiceDeskState) -> dict[str, Any]:
             user_message,
             state.get("classification", {}),
             "You asked to create a ticket. Review the incident details and approve to create it.",
+            knowledge_sources=state.get("knowledge", {}).get("sources", []),
+            similar_incidents=state.get("similar_tickets", []),
         )
 
     context = {
@@ -160,6 +171,8 @@ def ticket_agent(state: ServiceDeskState) -> dict[str, Any]:
             user_message,
             classification,
             decision.reason,
+            knowledge_sources=state.get("knowledge", {}).get("sources", []),
+            similar_incidents=state.get("similar_tickets", []),
         )
 
     if decision.action == "check_ticket_status":

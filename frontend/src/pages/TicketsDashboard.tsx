@@ -1,9 +1,20 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 
-import { TicketStatusCard } from '../components/TicketStatusCard'
+import { AnalyticsDashboard } from '../components/AnalyticsDashboard'
+import { TicketDetailsDrawer } from '../components/TicketDetailsDrawer'
 import { TicketsTable } from '../components/TicketsTable'
-import { getTicketErrorMessage, getTickets } from '../services/ticketService'
-import type { Ticket, TicketPriority, TicketStatus } from '../types/ticket'
+import {
+  getAdminDashboard,
+  getAdminTickets,
+  type AdminTicketFilters,
+} from '../services/adminTicketService'
+import { getTicketErrorMessage } from '../services/ticketService'
+import type {
+  AdminDashboardSummary,
+  Ticket,
+  TicketPriority,
+  TicketStatus,
+} from '../types/ticket'
 
 interface TicketsDashboardProps {
   refreshKey: number
@@ -23,82 +34,113 @@ const priorities: Array<'All' | TicketPriority> = [
   'Medium',
   'Low',
 ]
+const assignmentGroups = [
+  'Network Support',
+  'Hardware Support',
+  'Email Support',
+  'Identity & Access Management',
+  'Security Team',
+  'Database Team',
+  'Cloud Support',
+  'Messaging Team',
+]
+const pageSize = 10
 
 export function TicketsDashboard({ refreshKey }: TicketsDashboardProps) {
   const [tickets, setTickets] = useState<Ticket[]>([])
+  const [summary, setSummary] = useState<AdminDashboardSummary | null>(null)
+  const [total, setTotal] = useState(0)
+  const [totalPages, setTotalPages] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'All' | TicketStatus>('All')
-  const [priorityFilter, setPriorityFilter] =
-    useState<'All' | TicketPriority>('All')
+  const [priorityFilter, setPriorityFilter] = useState<'All' | TicketPriority>('All')
+  const [assignmentFilter, setAssignmentFilter] = useState('')
+  const [sortBy, setSortBy] = useState<AdminTicketFilters['sortBy']>('created_at')
+  const [sortOrder, setSortOrder] = useState<AdminTicketFilters['sortOrder']>('desc')
+  const [page, setPage] = useState(1)
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null)
+  const [activeSection, setActiveSection] = useState<'tickets' | 'analytics'>('tickets')
+  const [localRefreshKey, setLocalRefreshKey] = useState(0)
 
   useEffect(() => {
     let active = true
+    const filters: AdminTicketFilters = {
+      search: query.trim(),
+      status: statusFilter,
+      priority: priorityFilter,
+      assignmentGroup: assignmentFilter,
+      sortBy,
+      sortOrder,
+      page,
+      pageSize,
+    }
 
-    async function loadTickets() {
+    async function loadDashboard() {
       setIsLoading(true)
-      try {
-        const result = await getTickets()
-        if (active) {
-          setTickets(result)
-          setError(null)
-        }
-      } catch (loadError: unknown) {
-        if (active) setError(getTicketErrorMessage(loadError))
-      } finally {
-        if (active) setIsLoading(false)
+      const [ticketResult, dashboardResult] = await Promise.allSettled([
+        getAdminTickets(filters),
+        getAdminDashboard(),
+      ])
+      if (!active) return
+
+      if (ticketResult.status === 'fulfilled') {
+        setTickets(ticketResult.value.items)
+        setTotal(ticketResult.value.total)
+        setTotalPages(ticketResult.value.total_pages)
+      } else {
+        setError(getTicketErrorMessage(ticketResult.reason))
+        setIsLoading(false)
+        return
+      }
+
+      if (dashboardResult.status === 'fulfilled') {
+        setSummary(dashboardResult.value)
+        setError(null)
+      } else {
+        setError(
+          `Ticket metrics are unavailable: ${getTicketErrorMessage(dashboardResult.reason)}`,
+        )
+      }
+      if (active) {
+        setIsLoading(false)
       }
     }
 
-    void loadTickets()
+    void loadDashboard()
     return () => {
       active = false
     }
-  }, [refreshKey])
-
-  const filteredTickets = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase()
-    return tickets.filter((ticket) => {
-      const matchesQuery =
-        !normalizedQuery ||
-        [
-          ticket.ticket_id,
-          ticket.title,
-          ticket.description,
-          ticket.category,
-          ticket.subcategory,
-          ticket.assigned_group,
-          ticket.resolution ?? '',
-        ]
-          .join(' ')
-          .toLowerCase()
-          .includes(normalizedQuery)
-      const matchesStatus =
-        statusFilter === 'All' || ticket.status === statusFilter
-      const matchesPriority =
-        priorityFilter === 'All' || ticket.priority === priorityFilter
-      return matchesQuery && matchesStatus && matchesPriority
-    })
-  }, [tickets, query, statusFilter, priorityFilter])
+  }, [
+    refreshKey,
+    localRefreshKey,
+    query,
+    statusFilter,
+    priorityFilter,
+    assignmentFilter,
+    sortBy,
+    sortOrder,
+    page,
+  ])
 
   const selectedTicket =
     tickets.find((ticket) => ticket.ticket_id === selectedTicketId) ?? null
-  const openCount = tickets.filter(
-    (ticket) => ticket.status === 'Open' || ticket.status === 'In Progress',
-  ).length
-  const resolvedCount = tickets.filter(
-    (ticket) => ticket.status === 'Resolved',
-  ).length
-  const highPriorityCount = tickets.filter(
-    (ticket) => ticket.priority === 'High' || ticket.priority === 'Critical',
-  ).length
 
   function toggleTicket(ticket: Ticket) {
     setSelectedTicketId((current) =>
       current === ticket.ticket_id ? null : ticket.ticket_id,
     )
+  }
+
+  function changeSort(value: string) {
+    const [nextSortBy, nextSortOrder] = value.split(':') as [
+      AdminTicketFilters['sortBy'],
+      AdminTicketFilters['sortOrder'],
+    ]
+    setSortBy(nextSortBy)
+    setSortOrder(nextSortOrder)
+    setPage(1)
   }
 
   return (
@@ -107,101 +149,173 @@ export function TicketsDashboard({ refreshKey }: TicketsDashboardProps) {
         <div>
           <p className="ticket-eyebrow">SERVICE OPERATIONS</p>
           <h2 id="tickets-dashboard-title">Ticket Center</h2>
-          <p>Review incidents created from approved AI recommendations.</p>
+          <p>Review and manage incidents across your service desk.</p>
         </div>
         <span className="ticket-center-badge">
-          <span aria-hidden="true">●</span> In-memory ticket service
+          <span aria-hidden="true">●</span> Connected to PostgreSQL
         </span>
       </header>
 
-      <div className="ticket-metric-grid" aria-label="Ticket metrics">
-        <article className="ticket-metric-card">
-          <span>All Tickets</span><strong>{tickets.length}</strong>
-        </article>
-        <article className="ticket-metric-card ticket-metric-card--open">
-          <span>Open Tickets</span><strong>{openCount}</strong>
-        </article>
-        <article className="ticket-metric-card ticket-metric-card--resolved">
-          <span>Resolved Tickets</span><strong>{resolvedCount}</strong>
-        </article>
-        <article className="ticket-metric-card ticket-metric-card--priority">
-          <span>High Priority</span><strong>{highPriorityCount}</strong>
-        </article>
-      </div>
+      <nav className="ticket-section-tabs" aria-label="Ticket center sections">
+        <button
+          className={activeSection === 'tickets' ? 'ticket-section-tab ticket-section-tab--active' : 'ticket-section-tab'}
+          type="button"
+          aria-current={activeSection === 'tickets' ? 'page' : undefined}
+          onClick={() => setActiveSection('tickets')}
+        >
+          Ticket queue
+        </button>
+        <button
+          className={activeSection === 'analytics' ? 'ticket-section-tab ticket-section-tab--active' : 'ticket-section-tab'}
+          type="button"
+          aria-current={activeSection === 'analytics' ? 'page' : undefined}
+          onClick={() => setActiveSection('analytics')}
+        >
+          Analytics
+        </button>
+      </nav>
 
-      <section className="tickets-list-panel" aria-label="All service desk tickets">
-        <div className="tickets-list-header">
-          <div>
-            <h3>All Tickets</h3>
-            <p>{filteredTickets.length} of {tickets.length} incidents</p>
+      {activeSection === 'tickets' ? (
+        <>
+          <div className="ticket-metric-grid" aria-label="Ticket metrics">
+            <article className="ticket-metric-card">
+              <span>All Tickets</span><strong>{summary?.total_tickets ?? '—'}</strong>
+            </article>
+            <article className="ticket-metric-card ticket-metric-card--open">
+              <span>Open Tickets</span><strong>{summary?.open_tickets ?? '—'}</strong>
+            </article>
+            <article className="ticket-metric-card ticket-metric-card--resolved">
+              <span>Resolved Tickets</span><strong>{summary?.resolved_tickets ?? '—'}</strong>
+            </article>
+            <article className="ticket-metric-card ticket-metric-card--priority">
+              <span>High Priority</span><strong>{summary?.high_priority_tickets ?? '—'}</strong>
+            </article>
+            <article className="ticket-metric-card ticket-metric-card--documents">
+              <span>Knowledge Documents</span><strong>{summary?.knowledge_documents ?? '—'}</strong>
+            </article>
           </div>
-          <div className="tickets-filters">
-            <label className="tickets-search">
-              <span className="sr-only">Search tickets</span>
-              <svg viewBox="0 0 20 20" aria-hidden="true">
-                <circle cx="8.5" cy="8.5" r="5.5" />
-                <path d="m13 13 4 4" />
-              </svg>
-              <input
-                type="search"
-                placeholder="Search tickets"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-              />
-            </label>
-            <label className="ticket-filter">
-              <span className="sr-only">Filter by status</span>
-              <select
-                value={statusFilter}
-                onChange={(event) =>
-                  setStatusFilter(event.target.value as 'All' | TicketStatus)
-                }
-              >
-                {ticketStatuses.map((status) => <option key={status}>{status}</option>)}
-              </select>
-            </label>
-            <label className="ticket-filter">
-              <span className="sr-only">Filter by priority</span>
-              <select
-                value={priorityFilter}
-                onChange={(event) =>
-                  setPriorityFilter(event.target.value as 'All' | TicketPriority)
-                }
-              >
-                {priorities.map((priority) => <option key={priority}>{priority}</option>)}
-              </select>
-            </label>
-          </div>
-        </div>
 
-        {error && <div className="ticket-page-error" role="alert">{error}</div>}
-        {isLoading ? (
-          <div className="tickets-loading" role="status">
-            <span className="loading-spinner" /> Loading tickets…
-          </div>
-        ) : (
-          <TicketsTable
-            tickets={filteredTickets}
-            selectedTicketId={selectedTicketId}
-            onSelect={toggleTicket}
-          />
-        )}
-      </section>
+          <section className="tickets-list-panel" aria-label="All service desk tickets">
+            <div className="tickets-list-header">
+              <div>
+                <h3>All Tickets</h3>
+                <p>{total ? `Showing ${Math.min((page - 1) * pageSize + 1, total)}–${Math.min(page * pageSize, total)} of ${total} incidents` : '0 incidents'}</p>
+              </div>
+              <div className="tickets-filters">
+                <label className="tickets-search">
+                  <span className="sr-only">Search tickets</span>
+                  <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <circle cx="8.5" cy="8.5" r="5.5" />
+                    <path d="m13 13 4 4" />
+                  </svg>
+                  <input
+                    type="search"
+                    placeholder="Search tickets"
+                    value={query}
+                    onChange={(event) => {
+                      setQuery(event.target.value)
+                      setPage(1)
+                    }}
+                  />
+                </label>
+                <label className="ticket-filter">
+                  <span className="sr-only">Filter by status</span>
+                  <select
+                    value={statusFilter}
+                    onChange={(event) => {
+                      setStatusFilter(event.target.value as 'All' | TicketStatus)
+                      setPage(1)
+                    }}
+                  >
+                    {ticketStatuses.map((status) => <option key={status}>{status}</option>)}
+                  </select>
+                </label>
+                <label className="ticket-filter">
+                  <span className="sr-only">Filter by priority</span>
+                  <select
+                    value={priorityFilter}
+                    onChange={(event) => {
+                      setPriorityFilter(event.target.value as 'All' | TicketPriority)
+                      setPage(1)
+                    }}
+                  >
+                    {priorities.map((priority) => <option key={priority}>{priority}</option>)}
+                  </select>
+                </label>
+                <label className="ticket-filter">
+                  <span className="sr-only">Filter by assignment group</span>
+                  <select
+                    value={assignmentFilter}
+                    onChange={(event) => {
+                      setAssignmentFilter(event.target.value)
+                      setPage(1)
+                    }}
+                  >
+                    <option value="">All groups</option>
+                    {assignmentGroups.map((group) => <option key={group}>{group}</option>)}
+                  </select>
+                </label>
+                <label className="ticket-filter">
+                  <span className="sr-only">Sort tickets</span>
+                  <select
+                    value={`${sortBy}:${sortOrder}`}
+                    onChange={(event) => changeSort(event.target.value)}
+                  >
+                    <option value="created_at:desc">Newest first</option>
+                    <option value="created_at:asc">Oldest first</option>
+                    <option value="updated_at:desc">Recently updated</option>
+                    <option value="priority:desc">Priority</option>
+                    <option value="status:asc">Status</option>
+                    <option value="ticket_id:asc">Ticket number</option>
+                  </select>
+                </label>
+              </div>
+            </div>
 
-      {selectedTicket && <TicketStatusCard ticket={selectedTicket} />}
+            {error && <div className="ticket-page-error" role="alert">{error}</div>}
+            {isLoading ? (
+              <div className="tickets-loading" role="status">
+                <span className="loading-spinner" /> Loading tickets…
+              </div>
+            ) : (
+              <>
+                <TicketsTable
+                  tickets={tickets}
+                  selectedTicketId={selectedTicketId}
+                  onSelect={toggleTicket}
+                />
+                {totalPages > 1 && (
+                  <nav className="ticket-pagination" aria-label="Ticket pages">
+                    <span>Page {page} of {totalPages}</span>
+                    <div>
+                      <button type="button" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>
+                        Previous
+                      </button>
+                      <button type="button" disabled={page >= totalPages} onClick={() => setPage((current) => current + 1)}>
+                        Next
+                      </button>
+                    </div>
+                  </nav>
+                )}
+              </>
+            )}
+          </section>
+        </>
+      ) : (
+        <AnalyticsDashboard refreshKey={refreshKey + localRefreshKey} />
+      )}
 
-      <aside className="admin-portal-placeholder">
-        <span className="admin-placeholder-icon" aria-hidden="true">↗</span>
-        <div>
-          <p className="ticket-eyebrow">ADMIN PORTAL READY</p>
-          <h3>Built for future service operations</h3>
-          <p>
-            Ticket updates, assignment, resolution workflows, and analytics can
-            use the same ticket APIs when the admin portal is introduced.
-          </p>
-        </div>
-        <span className="coming-soon-pill">Admin tools coming soon</span>
-      </aside>
+      {selectedTicket && (
+        <TicketDetailsDrawer
+          key={selectedTicket.ticket_id}
+          ticket={selectedTicket}
+          onClose={() => setSelectedTicketId(null)}
+          onUpdated={() => {
+            setPage(1)
+            setLocalRefreshKey((current) => current + 1)
+          }}
+        />
+      )}
     </section>
   )
 }

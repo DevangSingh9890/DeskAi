@@ -1,5 +1,4 @@
 import logging
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -86,13 +85,23 @@ def approve_ticket(
         try:
             ticket = service.create_ticket(request.ticket_details)
         except (TicketServiceError, ValueError) as create_exc:
-            logger.exception("Approved ticket creation failed")
+            logger.exception(
+                "Approved ticket creation failed approval_id=%s error_type=%s error=%s",
+                request.approval_id,
+                type(create_exc).__name__,
+                create_exc,
+            )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="The approved ticket could not be created.",
             ) from create_exc
     except (TicketServiceError, ValueError) as exc:
-        logger.exception("Approved ticket creation failed")
+        logger.exception(
+            "Approved ticket creation failed approval_id=%s error_type=%s error=%s",
+            request.approval_id,
+            type(exc).__name__,
+            exc,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="The approved ticket could not be created.",
@@ -194,21 +203,6 @@ def update_ticket(
         ) from exc
 
 
-@router.get("/admin/tickets", response_model=list[Ticket])
-def admin_list_tickets(
-    service: TicketService = Depends(get_ticket_service),
-) -> list[Ticket]:
-    return service.list_tickets()
-
-
-@router.get("/admin/tickets/{ticket_id}", response_model=Ticket)
-def admin_get_ticket(
-    ticket_id: str,
-    service: TicketService = Depends(get_ticket_service),
-) -> Ticket:
-    return get_ticket(ticket_id, service)
-
-
 @router.put("/admin/tickets/{ticket_id}", response_model=Ticket)
 def admin_update_ticket(
     ticket_id: str,
@@ -216,10 +210,3 @@ def admin_update_ticket(
     service: TicketService = Depends(get_ticket_service),
 ) -> Ticket:
     return update_ticket(ticket_id, request, service)
-
-
-@router.get("/admin/analytics")
-def admin_ticket_analytics(
-    service: TicketService = Depends(get_ticket_service),
-) -> dict[str, Any]:
-    return service.get_analytics()

@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import ENV_FILE, settings
 from app.database.database import initialize_database
 from app.routes.chat import router as chat_router
+from app.routes.admin import router as admin_router
 from app.routes.knowledge_base import router as knowledge_base_router
 from app.routes.rag import router as rag_router
 from app.routes.tickets import router as tickets_router
@@ -63,6 +64,7 @@ app.include_router(chat_router, prefix="/api")
 app.include_router(knowledge_base_router, prefix="/api/documents", tags=["documents"])
 app.include_router(rag_router, prefix="/api/knowledge-base", tags=["knowledge-base"])
 app.include_router(tickets_router, prefix="/api", tags=["tickets"])
+app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
 
 
 @app.get("/")

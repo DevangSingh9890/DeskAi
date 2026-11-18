@@ -26,6 +26,66 @@ export interface Ticket {
   updated_at: string
   created_by: string
   resolution: string | null
+  impact: string
+  ai_recommendation: string | null
+  knowledge_sources: string[]
+  similar_incidents: SimilarTicket[]
+}
+
+export interface TicketComment {
+  id: number
+  ticket_id: string
+  author: string
+  body: string
+  created_at: string
+}
+
+export interface TicketHistoryEntry {
+  id: number
+  ticket_id: string
+  event_type: string
+  old_value: string | null
+  new_value: string | null
+  actor: string
+  created_at: string
+}
+
+export interface AdminTicketDetail extends Ticket {
+  comments: TicketComment[]
+  history: TicketHistoryEntry[]
+}
+
+export interface AdminTicketPage {
+  items: Ticket[]
+  total: number
+  page: number
+  page_size: number
+  total_pages: number
+}
+
+export interface AdminDashboardSummary {
+  total_tickets: number
+  open_tickets: number
+  resolved_tickets: number
+  high_priority_tickets: number
+  knowledge_documents: number
+}
+
+export interface AnalyticsDatum {
+  name: string
+  count: number
+}
+
+export interface TicketAnalytics {
+  total_tickets: number
+  open_tickets: number
+  resolved_tickets: number
+  high_priority_tickets: number
+  ticket_categories: AnalyticsDatum[]
+  priority_distribution: AnalyticsDatum[]
+  status_distribution: AnalyticsDatum[]
+  tickets_created_by_day: Array<{ date: string; count: number }>
+  assigned_group_distribution: AnalyticsDatum[]
 }
 
 export interface TicketCreateRequest {
@@ -36,6 +96,10 @@ export interface TicketCreateRequest {
   subcategory: string
   assigned_group: string
   created_by?: string
+  impact?: string
+  ai_recommendation?: string
+  knowledge_sources?: string[]
+  similar_incidents?: SimilarTicket[]
 }
 
 export interface TicketUpdateRequest {
