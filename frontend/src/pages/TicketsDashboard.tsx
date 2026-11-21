@@ -15,6 +15,7 @@ import type {
   TicketPriority,
   TicketStatus,
 } from '../types/ticket'
+import { HumanSupportQueue } from '../components/HumanSupportQueue'
 
 interface TicketsDashboardProps {
   refreshKey: number
@@ -61,7 +62,7 @@ export function TicketsDashboard({ refreshKey }: TicketsDashboardProps) {
   const [sortOrder, setSortOrder] = useState<AdminTicketFilters['sortOrder']>('desc')
   const [page, setPage] = useState(1)
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null)
-  const [activeSection, setActiveSection] = useState<'tickets' | 'analytics'>('tickets')
+  const [activeSection, setActiveSection] = useState<'tickets' | 'analytics' | 'human-support'>('tickets')
   const [localRefreshKey, setLocalRefreshKey] = useState(0)
 
   useEffect(() => {
@@ -163,7 +164,7 @@ export function TicketsDashboard({ refreshKey }: TicketsDashboardProps) {
           aria-current={activeSection === 'tickets' ? 'page' : undefined}
           onClick={() => setActiveSection('tickets')}
         >
-          Ticket queue
+          Ticket Center
         </button>
         <button
           className={activeSection === 'analytics' ? 'ticket-section-tab ticket-section-tab--active' : 'ticket-section-tab'}
@@ -171,7 +172,15 @@ export function TicketsDashboard({ refreshKey }: TicketsDashboardProps) {
           aria-current={activeSection === 'analytics' ? 'page' : undefined}
           onClick={() => setActiveSection('analytics')}
         >
-          Analytics
+          Admin Analytics
+        </button>
+        <button
+          className={activeSection === 'human-support' ? 'ticket-section-tab ticket-section-tab--active' : 'ticket-section-tab'}
+          type="button"
+          aria-current={activeSection === 'human-support' ? 'page' : undefined}
+          onClick={() => setActiveSection('human-support')}
+        >
+          Human Support
         </button>
       </nav>
 
@@ -301,8 +310,10 @@ export function TicketsDashboard({ refreshKey }: TicketsDashboardProps) {
             )}
           </section>
         </>
-      ) : (
+      ) : activeSection === 'analytics' ? (
         <AnalyticsDashboard refreshKey={refreshKey + localRefreshKey} />
+      ) : (
+        <HumanSupportQueue />
       )}
 
       {selectedTicket && (

@@ -10,6 +10,7 @@ from app.database.database import initialize_database
 from app.routes.chat import router as chat_router
 from app.routes.admin import router as admin_router
 from app.routes.knowledge_base import router as knowledge_base_router
+from app.routes.handoff import router as handoff_router
 from app.routes.rag import router as rag_router
 from app.routes.tickets import router as tickets_router
 from app.services.file_service import ensure_uploads_dir
@@ -62,6 +63,7 @@ app.include_router(knowledge_base_router, prefix="/api/documents", tags=["docume
 app.include_router(rag_router, prefix="/api/knowledge-base", tags=["knowledge-base"])
 app.include_router(tickets_router, prefix="/api", tags=["tickets"])
 app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
+app.include_router(handoff_router, prefix="/api")
 
 
 @app.get("/")

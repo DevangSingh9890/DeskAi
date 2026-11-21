@@ -20,6 +20,8 @@ export interface ChatMessage {
   ticketApprovalState?: TicketApprovalState
   ticketApprovalError?: string
   createdTicket?: Ticket
+  handoffRecommended?: boolean
+  handoffDismissed?: boolean
 }
 
 export interface ChatRequest {
@@ -72,6 +74,11 @@ export interface AgentTroubleshooting {
 export interface AgentChatResponse {
   classification?: AgentClassification | null
   knowledge_sources?: string[] | null
+  knowledge_results?: Array<{
+    content: string
+    metadata: Record<string, string>
+    score: number
+  }> | null
   troubleshooting?: AgentTroubleshooting | null
   response?: string | null
   recommended_action?: string | null

@@ -190,6 +190,7 @@ def agent_chat(request: ChatRequest) -> AgentChatResponse:
     return AgentChatResponse(
         classification=state.get("classification", {}),
         knowledge_sources=state.get("knowledge", {}).get("sources", []),
+        knowledge_results=state.get("knowledge", {}).get("chunks", []),
         troubleshooting=state.get("troubleshooting", {}),
         response=state.get("final_response", {}).get("response", ""),
         ticket_recommendation=state.get("ticket_recommendation"),

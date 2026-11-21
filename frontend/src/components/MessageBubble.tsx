@@ -5,10 +5,16 @@ import { ClassificationCard } from './ClassificationCard'
 import { KnowledgeSourcesCard } from './KnowledgeSourcesCard'
 import { RecommendationCard } from './RecommendationCard'
 import { TroubleshootingCard } from './TroubleshootingCard'
+import { TransferToHumanCard } from './TransferToHumanCard'
 
 interface MessageBubbleProps {
   message: ChatMessage
   onTicketDecision: (messageId: string, approved: boolean) => void
+  onHandoff: (messageId: string) => void
+  onContinueWithAI: (messageId: string) => void
+  handoffPending: boolean
+  handoffError: string | null
+  handoffExists: boolean
 }
 
 function AssistantMark() {
@@ -20,7 +26,15 @@ function AssistantMark() {
   )
 }
 
-export function MessageBubble({ message, onTicketDecision }: MessageBubbleProps) {
+export function MessageBubble({
+  message,
+  onTicketDecision,
+  onHandoff,
+  onContinueWithAI,
+  handoffPending,
+  handoffError,
+  handoffExists,
+}: MessageBubbleProps) {
   const isAssistant = message.role === 'assistant'
 
   return (
@@ -88,6 +102,14 @@ export function MessageBubble({ message, onTicketDecision }: MessageBubbleProps)
                 onReject={() => onTicketDecision(message.id, false)}
               />
             </div>
+            {message.handoffRecommended && !message.handoffDismissed && !handoffExists && (
+              <TransferToHumanCard
+                disabled={handoffPending}
+                error={handoffError}
+                onTransfer={() => onHandoff(message.id)}
+                onContinue={() => onContinueWithAI(message.id)}
+              />
+            )}
           </>
         ) : (
           <>

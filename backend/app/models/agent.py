@@ -8,6 +8,7 @@ from app.models.ticket import SimilarTicket, TicketRecommendation, TicketStatusR
 class AgentChatResponse(BaseModel):
     classification: dict[str, Any]
     knowledge_sources: list[str]
+    knowledge_results: list[dict[str, Any]] = Field(default_factory=list)
     troubleshooting: dict[str, Any]
     response: str
     ticket_recommendation: TicketRecommendation | None = None

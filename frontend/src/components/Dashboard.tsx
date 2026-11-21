@@ -27,6 +27,14 @@ import {
   approveTicket,
   getTicketErrorMessage,
 } from '../services/ticketService'
+import {
+  createHandoff,
+  getHandoffErrorMessage,
+} from '../services/handoffService'
+import type { CreateHandoffRequest } from '../types/handoff'
+import { HumanChatWidget } from './HumanChatWidget'
+import { HumanSupportPopup } from './HumanSupportPopup'
+import '../human-support.css'
 
 const greeting: ChatMessage = {
   id: 'welcome',
@@ -82,6 +90,12 @@ function getTicketDetails(message: ChatMessage): TicketCreateRequest | undefined
 
 export function Dashboard() {
   const [activeView, setActiveView] = useState<'chat' | 'tickets'>('chat')
+  const [handoffConversationId, setHandoffConversationId] = useState<string | null>(
+    () => window.localStorage.getItem('deskai-human-support-conversation'),
+  )
+  const [showHandoffPopup, setShowHandoffPopup] = useState(false)
+  const [isHandoffPending, setIsHandoffPending] = useState(false)
+  const [handoffError, setHandoffError] = useState<string | null>(null)
   const [ticketsRefreshKey, setTicketsRefreshKey] = useState(0)
   const [messages, setMessages] = useState<ChatMessage[]>([greeting])
   const [draft, setDraft] = useState('')
@@ -258,6 +272,10 @@ export function Dashboard() {
     try {
       const result = await sendAgentChatMessage(message)
       const completedAt = new Date()
+      const needsHumanSupport =
+        !(result.knowledge_results?.length || result.knowledge_sources?.length) ||
+        /could not find|no useful answer|unable to help/i.test(result.response ?? '') ||
+        /\b(human|real person|support engineer|representative|live agent)\b/i.test(message)
       setMessages((currentMessages) => [
         ...currentMessages,
         {
@@ -268,6 +286,7 @@ export function Dashboard() {
           workflowDurationMs: performance.now() - startedAt,
           originalUserMessage: message,
           timestamp: completedAt,
+          handoffRecommended: needsHumanSupport,
         },
       ])
     } catch (error: unknown) {
@@ -277,6 +296,73 @@ export function Dashboard() {
       setAgentProgress(null)
       setIsChatLoading(false)
     }
+  }
+
+  async function handleHandoff(messageId: string) {
+    if (isHandoffPending || handoffConversationId) return
+    const sourceMessage = messages.find((message) => message.id === messageId)
+    if (!sourceMessage?.agentResponse) return
+
+    setIsHandoffPending(true)
+    setHandoffError(null)
+    const conversationMessages: CreateHandoffRequest['messages'] = messages.map(
+      (message) => ({
+        role: message.role,
+        content: message.content,
+        timestamp: message.timestamp.toISOString(),
+        metadata: {
+          ...(message.agentResponse ? { agent_response: message.agentResponse } : {}),
+          ...(message.classification ? { classification: message.classification } : {}),
+          ...(message.originalUserMessage
+            ? { original_user_message: message.originalUserMessage }
+            : {}),
+          ...(message.createdTicket ? { ticket_data: message.createdTicket } : {}),
+        },
+      }),
+    )
+    const classification = sourceMessage.agentResponse.classification
+    const ticketData =
+      sourceMessage.createdTicket ?? getTicketDetails(sourceMessage) ?? null
+    const payload: CreateHandoffRequest = {
+      messages: conversationMessages,
+      context: {
+        classification: classification ?? null,
+        knowledge_sources: sourceMessage.agentResponse.knowledge_sources ?? [],
+        knowledge_results: sourceMessage.agentResponse.knowledge_results ?? [],
+        troubleshooting: sourceMessage.agentResponse.troubleshooting ?? null,
+        ticket_recommendation:
+          sourceMessage.agentResponse.ticket_recommendation ?? null,
+        similar_tickets: sourceMessage.agentResponse.similar_tickets ?? [],
+        ticket_data: ticketData,
+      },
+      ticket_id: sourceMessage.createdTicket?.ticket_id ?? null,
+      priority: classification?.priority ?? 'Medium',
+      category: classification?.category ?? 'Unclassified',
+    }
+
+    try {
+      const created = await createHandoff(payload)
+      window.localStorage.setItem(
+        'deskai-human-support-conversation',
+        created.conversation_id,
+      )
+      setHandoffConversationId(created.conversation_id)
+      setShowHandoffPopup(true)
+    } catch (error: unknown) {
+      setHandoffError(getHandoffErrorMessage(error))
+    } finally {
+      setIsHandoffPending(false)
+    }
+  }
+
+  function handleContinueWithAI(messageId: string) {
+    setMessages((currentMessages) =>
+      currentMessages.map((message) =>
+        message.id === messageId
+          ? { ...message, handoffDismissed: true }
+          : message,
+      ),
+    )
   }
 
   async function handleTicketDecision(
@@ -458,7 +544,7 @@ export function Dashboard() {
               aria-current={activeView === 'chat' ? 'page' : undefined}
               onClick={() => setActiveView('chat')}
             >
-              Assistant
+              AI Support Portal
             </button>
             <button
               className={activeView === 'tickets' ? 'dashboard-view-tab dashboard-view-tab--active' : 'dashboard-view-tab'}
@@ -466,7 +552,7 @@ export function Dashboard() {
               aria-current={activeView === 'tickets' ? 'page' : undefined}
               onClick={() => setActiveView('tickets')}
             >
-              Tickets
+              Admin Portal
             </button>
           </nav>
           <span
@@ -556,6 +642,11 @@ export function Dashboard() {
               onTicketDecision={(messageId, approved) =>
                 void handleTicketDecision(messageId, approved)
               }
+              onHandoff={(messageId) => void handleHandoff(messageId)}
+              onContinueWithAI={handleContinueWithAI}
+              handoffPending={isHandoffPending}
+              handoffError={handoffError}
+              handoffExists={handoffConversationId !== null}
             />
             <ChatInput
               value={draft}
@@ -581,6 +672,15 @@ export function Dashboard() {
         <main className="ticket-page-shell">
           <TicketsDashboard refreshKey={ticketsRefreshKey} />
         </main>
+      )}
+      {handoffConversationId && (
+        <HumanChatWidget conversationId={handoffConversationId} />
+      )}
+      {showHandoffPopup && handoffConversationId && (
+        <HumanSupportPopup
+          conversationId={handoffConversationId}
+          onClose={() => setShowHandoffPopup(false)}
+        />
       )}
     </div>
   )

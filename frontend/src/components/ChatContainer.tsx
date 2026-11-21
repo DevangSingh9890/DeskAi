@@ -10,6 +10,11 @@ interface ChatContainerProps {
   error: string | null
   onSelectSuggestion: (value: string) => void
   onTicketDecision: (messageId: string, approved: boolean) => void
+  onHandoff: (messageId: string) => void
+  onContinueWithAI: (messageId: string) => void
+  handoffPending: boolean
+  handoffError: string | null
+  handoffExists: boolean
 }
 
 const suggestions = [
@@ -44,6 +49,11 @@ export function ChatContainer({
   error,
   onSelectSuggestion,
   onTicketDecision,
+  onHandoff,
+  onContinueWithAI,
+  handoffPending,
+  handoffError,
+  handoffExists,
 }: ChatContainerProps) {
   const endOfMessagesRef = useRef<HTMLDivElement>(null)
 
@@ -86,6 +96,11 @@ export function ChatContainer({
             key={message.id}
             message={message}
             onTicketDecision={onTicketDecision}
+            onHandoff={onHandoff}
+            onContinueWithAI={onContinueWithAI}
+            handoffPending={handoffPending}
+            handoffError={handoffError}
+            handoffExists={handoffExists}
           />
         ))}
 
