@@ -9,9 +9,10 @@ import type { HumanConversation, HumanChatMessage } from '../types/handoff'
 
 interface HumanChatWidgetProps {
   conversationId: string
+  onClosed: (conversationId: string) => void
 }
 
-export function HumanChatWidget({ conversationId }: HumanChatWidgetProps) {
+export function HumanChatWidget({ conversationId, onClosed }: HumanChatWidgetProps) {
   const [conversation, setConversation] = useState<HumanConversation | null>(null)
   const [messages, setMessages] = useState<HumanChatMessage[]>([])
   const [draft, setDraft] = useState('')
@@ -22,19 +23,30 @@ export function HumanChatWidget({ conversationId }: HumanChatWidgetProps) {
 
   useEffect(() => {
     let active = true
+    let terminal = false
     let timeoutId: number | undefined
 
     async function poll() {
       try {
         const detail = await getHumanConversation(conversationId)
         if (!active) return
+        if (
+          detail.conversation.status === 'Resolved' ||
+          detail.conversation.status === 'Closed'
+        ) {
+          terminal = true
+          onClosed(conversationId)
+          return
+        }
         setConversation(detail.conversation)
         setMessages(detail.messages)
         setError(null)
       } catch (pollError: unknown) {
         if (active) setError(getHandoffErrorMessage(pollError))
       } finally {
-        if (active) timeoutId = window.setTimeout(() => void poll(), 2000)
+        if (active && !terminal) {
+          timeoutId = window.setTimeout(() => void poll(), 2000)
+        }
       }
     }
 
@@ -43,7 +55,7 @@ export function HumanChatWidget({ conversationId }: HumanChatWidgetProps) {
       active = false
       if (timeoutId !== undefined) window.clearTimeout(timeoutId)
     }
-  }, [conversationId])
+  }, [conversationId, onClosed])
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -52,7 +64,12 @@ export function HumanChatWidget({ conversationId }: HumanChatWidgetProps) {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const message = draft.trim()
-    if (!message || isSending || conversation?.status === 'Resolved') return
+    if (
+      !message ||
+      isSending ||
+      conversation?.status === 'Resolved' ||
+      conversation?.status === 'Closed'
+    ) return
 
     setIsSending(true)
     setError(null)
@@ -95,7 +112,9 @@ export function HumanChatWidget({ conversationId }: HumanChatWidgetProps) {
       </header>
       <div className="human-chat-widget__status">
         <span className={`human-status-dot human-status-dot--${conversation?.status === 'Resolved' ? 'resolved' : 'active'}`} />
-        {conversation?.status === 'Waiting' ? 'Waiting for Human Support Engineer' : conversation?.status ?? 'Connecting'}
+        {conversation?.status === 'Pending' || conversation?.status === 'Waiting'
+          ? 'Waiting for Human Support Engineer'
+          : conversation?.status ?? 'Connecting'}
         <small>{conversationId}</small>
       </div>
       <div className="human-chat-widget__messages" aria-live="polite">
@@ -120,10 +139,26 @@ export function HumanChatWidget({ conversationId }: HumanChatWidgetProps) {
           value={draft}
           maxLength={4000}
           onChange={(event) => setDraft(event.target.value)}
-          placeholder={conversation?.status === 'Resolved' ? 'Conversation resolved' : 'Write a message…'}
-          disabled={isSending || conversation?.status === 'Resolved'}
+          placeholder={
+            conversation?.status === 'Resolved' || conversation?.status === 'Closed'
+              ? 'Conversation closed'
+              : 'Write a message…'
+          }
+          disabled={
+            isSending ||
+            conversation?.status === 'Resolved' ||
+            conversation?.status === 'Closed'
+          }
         />
-        <button type="submit" disabled={!draft.trim() || isSending || conversation?.status === 'Resolved'}>
+        <button
+          type="submit"
+          disabled={
+            !draft.trim() ||
+            isSending ||
+            conversation?.status === 'Resolved' ||
+            conversation?.status === 'Closed'
+          }
+        >
           Send
         </button>
       </form>

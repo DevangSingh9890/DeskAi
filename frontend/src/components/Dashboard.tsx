@@ -30,6 +30,8 @@ import {
 import {
   createHandoff,
   getHandoffErrorMessage,
+  getHumanConversation,
+  isHandoffNotFound,
 } from '../services/handoffService'
 import type { CreateHandoffRequest } from '../types/handoff'
 import { HumanChatWidget } from './HumanChatWidget'
@@ -90,9 +92,7 @@ function getTicketDetails(message: ChatMessage): TicketCreateRequest | undefined
 
 export function Dashboard() {
   const [activeView, setActiveView] = useState<'chat' | 'tickets'>('chat')
-  const [handoffConversationId, setHandoffConversationId] = useState<string | null>(
-    () => window.localStorage.getItem('deskai-human-support-conversation'),
-  )
+  const [handoffConversationId, setHandoffConversationId] = useState<string | null>(null)
   const [showHandoffPopup, setShowHandoffPopup] = useState(false)
   const [isHandoffPending, setIsHandoffPending] = useState(false)
   const [handoffError, setHandoffError] = useState<string | null>(null)
@@ -113,6 +113,55 @@ export function Dashboard() {
   const [documentError, setDocumentError] = useState<string | null>(null)
   const [documentNotice, setDocumentNotice] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  useEffect(() => {
+    let active = true
+    let timeoutId: number | undefined
+    const storedConversationId = window.localStorage.getItem(
+      'deskai-human-support-conversation',
+    )
+    if (!storedConversationId) return
+    const savedConversationId = storedConversationId
+
+    function clearStoredConversation() {
+      if (
+        window.localStorage.getItem('deskai-human-support-conversation') ===
+        savedConversationId
+      ) {
+        window.localStorage.removeItem('deskai-human-support-conversation')
+      }
+    }
+
+    async function restoreActiveConversation() {
+      try {
+        const detail = await getHumanConversation(savedConversationId)
+        if (!active) return
+        if (
+          detail.conversation.status === 'Resolved' ||
+          detail.conversation.status === 'Closed'
+        ) {
+          clearStoredConversation()
+          return
+        }
+        setHandoffConversationId(savedConversationId)
+      } catch (error: unknown) {
+        if (!active) return
+        if (isHandoffNotFound(error)) {
+          clearStoredConversation()
+          return
+        }
+        timeoutId = window.setTimeout(
+          () => void restoreActiveConversation(),
+          2000,
+        )
+      }
+    }
+
+    void restoreActiveConversation()
+    return () => {
+      active = false
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId)
+    }
+  }, [])
   const isIndexing = documents.some(
     (document) =>
       document.ingestion_status === 'Processing' &&
@@ -348,6 +397,13 @@ export function Dashboard() {
       )
       setHandoffConversationId(created.conversation_id)
       setShowHandoffPopup(true)
+      setMessages((currentMessages) =>
+        currentMessages.map((message) =>
+          message.id === sourceMessage.id
+            ? { ...message, handoffDismissed: true }
+            : message,
+        ),
+      )
     } catch (error: unknown) {
       setHandoffError(getHandoffErrorMessage(error))
     } finally {
@@ -364,6 +420,19 @@ export function Dashboard() {
       ),
     )
   }
+
+  const handleHandoffClosed = useCallback((conversationId: string) => {
+    const storedConversationId = window.localStorage.getItem(
+      'deskai-human-support-conversation',
+    )
+    if (storedConversationId === conversationId) {
+      window.localStorage.removeItem('deskai-human-support-conversation')
+    }
+    setHandoffConversationId((currentId) =>
+      currentId === conversationId ? null : currentId,
+    )
+    setShowHandoffPopup(false)
+  }, [])
 
   async function handleTicketDecision(
     messageId: string,
@@ -674,7 +743,10 @@ export function Dashboard() {
         </main>
       )}
       {handoffConversationId && (
-        <HumanChatWidget conversationId={handoffConversationId} />
+        <HumanChatWidget
+          conversationId={handoffConversationId}
+          onClosed={handleHandoffClosed}
+        />
       )}
       {showHandoffPopup && handoffConversationId && (
         <HumanSupportPopup

@@ -385,7 +385,7 @@
 
 .human-queue-summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
   margin: 22px 0;
 }
@@ -516,6 +516,11 @@
 .human-status-label--resolved {
   color: #167451;
   background: #e3f7ef;
+}
+
+.human-status-label--closed {
+  color: #596377;
+  background: #eceff4;
 }
 
 .human-queue-empty,

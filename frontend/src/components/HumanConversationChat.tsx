@@ -117,11 +117,13 @@ export function HumanConversationChat({
           <h3>{conversation?.conversation_id ?? conversationId}</h3>
           <p>{conversation?.category ?? 'Loading'} · {conversation?.priority ?? '—'} priority · {conversation?.status ?? ''}</p>
         </div>
-        {conversation?.status === 'Waiting' ? (
+        {conversation?.status === 'Pending' || conversation?.status === 'Waiting' ? (
           <button type="button" disabled={busy} onClick={() => void handleAccept()}>
             {busy ? 'Accepting…' : 'Accept Conversation'}
           </button>
-        ) : conversation && conversation.status !== 'Resolved' ? (
+        ) : conversation &&
+          conversation.status !== 'Resolved' &&
+          conversation.status !== 'Closed' ? (
           <button className="human-resolve-button" type="button" disabled={busy} onClick={() => void handleResolve()}>
             Resolve
           </button>
@@ -167,7 +169,10 @@ export function HumanConversationChat({
           )}
         </aside>
       </div>
-      {conversation?.status !== 'Resolved' && conversation?.status !== 'Waiting' && (
+      {conversation?.status !== 'Resolved' &&
+        conversation?.status !== 'Closed' &&
+      conversation?.status !== 'Pending' &&
+      conversation?.status !== 'Waiting' && (
         <form className="human-admin-composer" onSubmit={(event) => void handleSubmit(event)}>
           <input
             aria-label="Reply to user"

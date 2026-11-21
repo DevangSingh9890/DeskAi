@@ -82,7 +82,7 @@ class HumanHandoffRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201)
         conversation = response.json()
         self.assertRegex(conversation["conversation_id"], r"^HUM-[A-F0-9]{8}$")
-        self.assertEqual(conversation["status"], "Waiting")
+        self.assertEqual(conversation["status"], "Pending")
         self.assertEqual(conversation["context"]["ticket_data"]["priority"], "High")
         detail = self.client.get(
             f"/api/handoff/{conversation['conversation_id']}/messages"
@@ -127,12 +127,33 @@ class HumanHandoffRouteTests(unittest.TestCase):
 
         resolved = self.client.post(f"/api/handoff/{conversation_id}/resolve")
         self.assertEqual(resolved.status_code, 200)
-        self.assertEqual(resolved.json()["status"], "Resolved")
+        self.assertEqual(resolved.json()["status"], "Closed")
         self.assertEqual(
             self.client.get(f"/api/handoff/{conversation_id}/status").json()[
                 "status"
             ],
-            "Resolved",
+            "Closed",
+        )
+        closed_queue = self.client.get("/api/handoff/requests?status=Closed")
+        self.assertEqual(len(closed_queue.json()), 1)
+        self.assertEqual(
+            len(
+                self.client.get(
+                    f"/api/handoff/{conversation_id}/messages"
+                ).json()["messages"]
+            ),
+            6,
+        )
+        self.assertEqual(
+            self.client.post(
+                f"/api/handoff/{conversation_id}/messages",
+                json={"sender_type": "agent", "message": "More help"},
+            ).status_code,
+            409,
+        )
+        self.assertEqual(
+            self.client.post(f"/api/handoff/{conversation_id}/accept").status_code,
+            409,
         )
 
     def test_accept_uses_default_support_engineer_without_body(self) -> None:

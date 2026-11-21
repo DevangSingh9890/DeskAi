@@ -3,17 +3,22 @@ import type { HumanConversationStatus, HumanConversationSummary } from '../types
 interface HumanConversationListProps {
   conversations: HumanConversationSummary[]
   selectedId: string | null
-  filter: 'All' | HumanConversationStatus
-  onFilterChange: (filter: 'All' | HumanConversationStatus) => void
+  filter: ConversationFilter
+  onFilterChange: (filter: ConversationFilter) => void
   onSelect: (conversationId: string) => void
 }
 
-const filters: Array<'All' | HumanConversationStatus> = [
+type ConversationFilter =
+  | 'All'
+  | Exclude<HumanConversationStatus, 'Waiting'>
+
+const filters: ConversationFilter[] = [
   'All',
-  'Waiting',
+  'Pending',
   'Assigned',
   'In Progress',
   'Resolved',
+  'Closed',
 ]
 
 export function HumanConversationList({
@@ -25,7 +30,11 @@ export function HumanConversationList({
 }: HumanConversationListProps) {
   const visible = filter === 'All'
     ? conversations
-    : conversations.filter((conversation) => conversation.status === filter)
+    : conversations.filter((conversation) =>
+        filter === 'Pending'
+          ? conversation.status === 'Pending' || conversation.status === 'Waiting'
+          : conversation.status === filter,
+      )
 
   return (
     <section className="human-queue-list" aria-label="Human support conversations">
@@ -37,8 +46,16 @@ export function HumanConversationList({
             type="button"
             onClick={() => onFilterChange(value)}
           >
-            {value === 'Waiting' ? 'Pending' : value === 'In Progress' ? 'Active' : value}
-            {value !== 'All' && <span>{conversations.filter((conversation) => conversation.status === value).length}</span>}
+            {value === 'In Progress' ? 'Active' : value}
+            {value !== 'All' && (
+              <span>
+                {conversations.filter((conversation) =>
+                  value === 'Pending'
+                    ? conversation.status === 'Pending' || conversation.status === 'Waiting'
+                    : conversation.status === value,
+                ).length}
+              </span>
+            )}
           </button>
         ))}
       </div>

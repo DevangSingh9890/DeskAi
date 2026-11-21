@@ -58,7 +58,7 @@ def create_handoff_request(
 
     conversation = HumanConversationRecord(
         conversation_id=f"HUM-{secrets.token_hex(4).upper()}",
-        status="Waiting",
+        status="Pending",
         ticket_id=request.ticket_id,
         priority=request.priority,
         category=request.category,
@@ -126,12 +126,12 @@ def accept_handoff_request(
     database: Session = Depends(get_db),
 ) -> HumanConversationRecord:
     conversation = _find_conversation(database, conversation_id)
-    if conversation.status == "Resolved":
+    if conversation.status in {"Resolved", "Closed"}:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="A resolved conversation cannot be accepted.",
+            detail="A resolved or closed conversation cannot be accepted.",
         )
-    if conversation.status == "Waiting":
+    if conversation.status in {"Pending", "Waiting"}:
         conversation.status = "Assigned"
         conversation.assigned_agent = request.agent_name
         database.add(
@@ -199,12 +199,15 @@ def send_handoff_message(
     database: Session = Depends(get_db),
 ) -> HumanChatMessageRecord:
     conversation = _find_conversation(database, conversation_id)
-    if conversation.status == "Resolved":
+    if conversation.status in {"Resolved", "Closed"}:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Messages cannot be sent to a resolved conversation.",
+            detail="Messages cannot be sent to a resolved or closed conversation.",
         )
-    if request.sender_type == "agent" and conversation.status == "Waiting":
+    if request.sender_type == "agent" and conversation.status in {
+        "Pending",
+        "Waiting",
+    }:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Accept the conversation before replying as a support engineer.",
@@ -248,18 +251,22 @@ def resolve_handoff_request(
     database: Session = Depends(get_db),
 ) -> HumanConversationRecord:
     conversation = _find_conversation(database, conversation_id)
-    if conversation.status == "Waiting":
+    if conversation.status in {"Pending", "Waiting"}:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Accept the conversation before resolving it.",
         )
+    if conversation.status == "Closed":
+        return conversation
     conversation.status = "Resolved"
     try:
+        database.flush()
+        conversation.status = "Closed"
         database.add(
             HumanChatMessageRecord(
                 conversation_id=conversation_id,
                 sender_type="system",
-                message="This human support conversation was resolved.",
+                message="This human support conversation was resolved and closed.",
             )
         )
         database.commit()

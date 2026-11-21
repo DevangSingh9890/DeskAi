@@ -10,7 +10,9 @@ import { HumanConversationList } from './HumanConversationList'
 export function HumanSupportQueue() {
   const [conversations, setConversations] = useState<HumanConversationSummary[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [filter, setFilter] = useState<'All' | HumanConversationStatus>('All')
+  const [filter, setFilter] = useState<
+    'All' | Exclude<HumanConversationStatus, 'Waiting'>
+  >('All')
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -47,10 +49,14 @@ export function HumanSupportQueue() {
   }
 
   const counts = {
-    pending: conversations.filter((conversation) => conversation.status === 'Waiting').length,
+    pending: conversations.filter(
+      (conversation) =>
+        conversation.status === 'Pending' || conversation.status === 'Waiting',
+    ).length,
     assigned: conversations.filter((conversation) => conversation.status === 'Assigned').length,
     active: conversations.filter((conversation) => conversation.status === 'In Progress').length,
     resolved: conversations.filter((conversation) => conversation.status === 'Resolved').length,
+    closed: conversations.filter((conversation) => conversation.status === 'Closed').length,
   }
 
   return (
@@ -68,6 +74,7 @@ export function HumanSupportQueue() {
         <div><span>Assigned</span><strong>{counts.assigned}</strong></div>
         <div><span>Active</span><strong>{counts.active}</strong></div>
         <div><span>Resolved</span><strong>{counts.resolved}</strong></div>
+        <div><span>Closed</span><strong>{counts.closed}</strong></div>
       </div>
       {error && <p className="human-admin-error" role="alert">{error}</p>}
       <div className="human-support-queue__workspace">

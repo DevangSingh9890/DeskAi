@@ -1,9 +1,11 @@
 export type HumanMessageSender = 'user' | 'agent' | 'system'
 export type HumanConversationStatus =
+  | 'Pending'
   | 'Waiting'
   | 'Assigned'
   | 'In Progress'
   | 'Resolved'
+  | 'Closed'
 
 export interface HumanConversation {
   id: number

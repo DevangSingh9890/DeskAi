@@ -1,3 +1,4 @@
+import axios from 'axios'
 import { api } from './api'
 import type {
   CreateHandoffRequest,
@@ -76,4 +77,8 @@ export function getHandoffErrorMessage(error: unknown): string {
     return error.response.data.detail
   }
   return 'Human support is unavailable right now. Please try again.'
+}
+
+export function isHandoffNotFound(error: unknown): boolean {
+  return axios.isAxiosError(error) && error.response?.status === 404
 }
