@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { HumanConversationStatus, HumanConversationSummary } from '../types/handoff'
 
 interface HumanConversationListProps {
@@ -28,16 +29,42 @@ export function HumanConversationList({
   onFilterChange,
   onSelect,
 }: HumanConversationListProps) {
-  const visible = filter === 'All'
+  const [query, setQuery] = useState('')
+  const filtered = filter === 'All'
     ? conversations
     : conversations.filter((conversation) =>
         filter === 'Pending'
           ? conversation.status === 'Pending' || conversation.status === 'Waiting'
           : conversation.status === filter,
       )
+  const search = query.trim().toLowerCase()
+  const visible = search
+    ? filtered.filter((conversation) =>
+        [
+          conversation.conversation_id,
+          conversation.ticket_id,
+          conversation.category,
+          conversation.priority,
+          conversation.status,
+        ].some((value) => value?.toLowerCase().includes(search)),
+      )
+    : filtered
 
   return (
     <section className="human-queue-list" aria-label="Human support conversations">
+      <label className="human-queue-search">
+        <span className="sr-only">Search conversations</span>
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <circle cx="8.5" cy="8.5" r="5.5" />
+          <path d="m13 13 4 4" />
+        </svg>
+        <input
+          type="search"
+          placeholder="Search conversations"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      </label>
       <div className="human-queue-list__filters" aria-label="Filter support queue">
         {filters.map((value) => (
           <button
@@ -75,7 +102,12 @@ export function HumanConversationList({
                 {conversation.status === 'Waiting' ? 'Pending' : conversation.status}
               </span>
             </span>
-            <span>{conversation.category} · {conversation.priority}</span>
+            <span className="human-queue-row__details">
+              <span>{conversation.category}</span>
+              <span className={`human-priority human-priority--${conversation.priority.toLowerCase()}`}>
+                <span aria-hidden="true">●</span> {conversation.priority}
+              </span>
+            </span>
             <time dateTime={conversation.created_at}>{new Date(conversation.created_at).toLocaleString()}</time>
           </button>
         ))}

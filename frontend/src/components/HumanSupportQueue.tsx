@@ -65,7 +65,6 @@ export function HumanSupportQueue() {
         <div>
           <p className="ticket-eyebrow">SERVICE OPERATIONS</p>
           <h2 id="human-support-title">Human Support Queue</h2>
-          <p>Accept and respond to conversations transferred from the AI Support Portal.</p>
         </div>
         <span className="human-queue-refresh"><span /> Polling every 2 seconds</span>
       </header>
