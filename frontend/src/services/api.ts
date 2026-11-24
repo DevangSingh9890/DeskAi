@@ -1,6 +1,7 @@
 import axios from 'axios'
 import type {
   AgentChatResponse,
+  AgentRefinementContext,
   ChatRequest,
   ChatResponse,
 } from '../types/chat'
@@ -33,9 +34,19 @@ export async function sendChatMessage(message: string): Promise<ChatResponse> {
 
 export async function sendAgentChatMessage(
   message: string,
+  refinementContext?: AgentRefinementContext,
 ): Promise<AgentChatResponse> {
-  const request: ChatRequest = { message }
-  const { data } = await api.post<AgentChatResponse>('/api/agent/chat', request)
+  const request: ChatRequest & {
+    refinement_context?: AgentRefinementContext
+  } = {
+    message,
+    ...(refinementContext ? { refinement_context: refinementContext } : {}),
+  }
+  const { data } = await api.post<AgentChatResponse>(
+    '/api/agent/chat',
+    request,
+    refinementContext ? { timeout: 35_000 } : undefined,
+  )
   return data
 }
 
@@ -46,7 +57,7 @@ export function getChatErrorMessage(error: unknown): string {
     }
 
     if (error.code === 'ECONNABORTED') {
-      return 'The request took too long. Please try again.'
+      return 'The backend did not respond within the chat request limit. Check backend and Groq latency before retrying.'
     }
 
     if (!error.response) {

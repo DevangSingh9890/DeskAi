@@ -7,6 +7,7 @@ import type {
 } from './ticket'
 
 export type MessageRole = 'assistant' | 'user'
+export type AnswerSatisfaction = 'helpful' | 'not_helpful'
 
 export interface ChatMessage {
   id: string
@@ -21,10 +22,32 @@ export interface ChatMessage {
   createdTicket?: Ticket
   handoffRecommended?: boolean
   handoffDismissed?: boolean
+  satisfaction?: AnswerSatisfaction
 }
 
 export interface ChatRequest {
   message: string
+}
+
+export interface AgentRefinementContext {
+  original_question: string
+  previous_response: string
+  conversation_history: Array<{
+    role: MessageRole
+    content: string
+    satisfaction?: AnswerSatisfaction
+  }>
+  classification: AgentClassification
+  troubleshooting: AgentTroubleshooting
+  knowledge_sources: string[]
+  knowledge_results: Array<{
+    content: string
+    metadata: Record<string, string>
+    score: number
+  }>
+  ticket_recommendation?: TicketRecommendation | null
+  similar_tickets?: SimilarTicket[]
+  ticket_status?: TicketStatusInfo | null
 }
 
 export interface IncidentClassification {

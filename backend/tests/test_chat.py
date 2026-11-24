@@ -6,11 +6,12 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import httpx
-from groq import APIConnectionError
+from groq import APIConnectionError, APITimeoutError
 from fastapi.testclient import TestClient
 
 from app.core.config import settings
 from app.main import app
+from app.models.agent import AgentRefinementContext
 from app.models.classification import IncidentClassification
 from app.services.groq_service import (
     GroqConfigurationError,
@@ -18,6 +19,7 @@ from app.services.groq_service import (
     SYSTEM_PROMPT,
     _create_tls_context,
     generate_response,
+    generate_refined_response,
 )
 
 
@@ -437,6 +439,55 @@ class GroqServiceTests(unittest.TestCase):
         self.assertEqual(call["response_format"], {"type": "json_object"})
 
     @patch("app.services.groq_service._get_client")
+    def test_refined_response_uses_one_bounded_groq_request(
+        self, get_client_mock: MagicMock
+    ) -> None:
+        groq_client = get_client_mock.return_value
+        request_client = MagicMock()
+        groq_client.with_options.return_value = request_client
+        request_client.chat.completions.create.return_value = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content="Try the sign-in page link.")
+                )
+            ]
+        )
+        context = AgentRefinementContext.model_validate({
+            "original_question": "Help me reset my password.",
+            "previous_response": "Use the password reset page.",
+            "conversation_history": [],
+            "classification": {"category": "Access Management"},
+            "troubleshooting": {},
+            "knowledge_sources": ["Password Guide.pdf"],
+            "knowledge_results": [
+                {
+                    "content": "Select Forgot Password.",
+                    "metadata": {"filename": "Password Guide.pdf"},
+                    "score": 0.9,
+                }
+            ],
+        })
+
+        response = generate_refined_response(
+            "I still cannot reset my password.",
+            context,
+        )
+
+        self.assertEqual(response, "Try the sign-in page link.")
+        groq_client.with_options.assert_called_once_with(
+            timeout=25.0,
+            max_retries=0,
+        )
+        request_client.chat.completions.create.assert_called_once()
+        call = request_client.chat.completions.create.call_args.kwargs
+        self.assertEqual(call["model"], settings.GROQ_MODEL)
+        self.assertIn("previous_response", call["messages"][1]["content"])
+        self.assertIn(
+            "I still cannot reset my password.",
+            call["messages"][1]["content"],
+        )
+
+    @patch("app.services.groq_service._get_client")
     def test_tls_failure_is_reported_as_groq_service_error(
         self, get_client_mock: MagicMock
     ) -> None:
@@ -448,6 +499,21 @@ class GroqServiceTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(GroqServiceError, "secure connection to Groq"):
+            generate_response("Help", "Available context")
+
+    @patch("app.services.groq_service._get_client")
+    def test_groq_timeout_is_reported_as_specific_service_error(
+        self, get_client_mock: MagicMock
+    ) -> None:
+        from app.services.groq_service import GroqTimeoutError
+
+        get_client_mock.return_value.chat.completions.create.side_effect = (
+            APITimeoutError(
+                request=httpx.Request("POST", "https://api.groq.com")
+            )
+        )
+
+        with self.assertRaisesRegex(GroqTimeoutError, "configured time limit"):
             generate_response("Help", "Available context")
 
 

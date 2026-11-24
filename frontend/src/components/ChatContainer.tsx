@@ -8,6 +8,7 @@ interface ChatContainerProps {
   error: string | null
   onSelectSuggestion: (value: string) => void
   onTicketDecision: (messageId: string, approved: boolean) => void
+  onAnswerFeedback: (messageId: string, helpful: boolean) => void
   onHandoff: (messageId: string) => void
   onContinueWithAI: (messageId: string) => void
   handoffPending: boolean
@@ -56,6 +57,7 @@ export function ChatContainer({
   error,
   onSelectSuggestion,
   onTicketDecision,
+  onAnswerFeedback,
   onHandoff,
   onContinueWithAI,
   handoffPending,
@@ -103,6 +105,7 @@ export function ChatContainer({
             key={message.id}
             message={message}
             onTicketDecision={onTicketDecision}
+            onAnswerFeedback={onAnswerFeedback}
             onHandoff={onHandoff}
             onContinueWithAI={onContinueWithAI}
             handoffPending={handoffPending}

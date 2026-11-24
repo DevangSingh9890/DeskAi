@@ -237,7 +237,7 @@ export function TicketDetailsDrawer({
                 <ul className="drawer-similar-list">
                   {current.similar_incidents.map((incident) => (
                     <li key={incident.ticket_id}>
-                      <strong>{incident.ticket_number ?? incident.ticket_id}</strong>
+                      <strong>{incident.ticket_id}</strong>
                       <span>{incident.summary} · {incident.category} · {incident.priority}</span>
                     </li>
                   ))}

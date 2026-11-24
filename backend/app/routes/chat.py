@@ -7,7 +7,7 @@ from pydantic import ValidationError
 from app.agents.classification_agent import ClassificationAgentError
 from app.core.config import settings
 from app.graphs.service_desk_graph import run_service_desk_graph
-from app.models.agent import AgentChatResponse
+from app.models.agent import AgentChatRequest, AgentChatResponse
 from app.models.classification import (
     ClassificationRequest,
     IncidentClassification,
@@ -21,7 +21,9 @@ from app.services.classification_service import (
 from app.services.groq_service import (
     GroqConfigurationError,
     GroqServiceError,
+    GroqTimeoutError,
     generate_response,
+    generate_refined_response,
 )
 from app.services.rag_service import (
     VectorStoreError,
@@ -154,7 +156,47 @@ def chat(request: ChatRequest) -> ChatResponse:
 
 
 @router.post("/agent/chat", response_model=AgentChatResponse)
-def agent_chat(request: ChatRequest) -> AgentChatResponse:
+def agent_chat(request: AgentChatRequest) -> AgentChatResponse:
+    if request.refinement_context is not None:
+        refinement = request.refinement_context
+        logger.info("Agent chat refinement started using supplied retrieval context")
+        try:
+            response = generate_refined_response(
+                request.message,
+                refinement,
+            )
+        except GroqConfigurationError as exc:
+            logger.error("Groq API is not configured for response refinement: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="The AI service is not configured.",
+            ) from exc
+        except GroqTimeoutError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail=(
+                    "The Groq service did not complete the refined response "
+                    "within its 25-second request limit."
+                ),
+            ) from exc
+        except GroqServiceError as exc:
+            logger.exception("Groq failed while refining a service-desk response")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="The AI service could not generate a refined response.",
+            ) from exc
+
+        return AgentChatResponse(
+            classification=refinement.classification,
+            knowledge_sources=refinement.knowledge_sources,
+            knowledge_results=refinement.knowledge_results,
+            troubleshooting=refinement.troubleshooting,
+            response=response,
+            ticket_recommendation=refinement.ticket_recommendation,
+            similar_tickets=refinement.similar_tickets,
+            ticket_status=refinement.ticket_status,
+        )
+
     try:
         state = run_service_desk_graph(request.message)
     except GroqConfigurationError as exc:
@@ -174,6 +216,11 @@ def agent_chat(request: ChatRequest) -> AgentChatResponse:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="The ticket service is unavailable.",
+        ) from exc
+    except GroqTimeoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="The Groq service did not complete the response in time.",
         ) from exc
     except (ClassificationAgentError, GroqServiceError, ValidationError) as exc:
         logger.exception("Service-desk agent graph failed")

@@ -18,7 +18,7 @@ export function TransferToHumanCard({
         <strong>Would you like to transfer this conversation to a human support engineer?</strong>
         <div className="handoff-recommendation__actions">
           <button type="button" disabled={disabled} onClick={onTransfer}>
-            {disabled ? 'Transferring…' : 'Transfer Chat'}
+            {disabled ? 'Transferring…' : 'Transfer to Human Support'}
           </button>
           <button type="button" className="handoff-button--secondary" onClick={onContinue}>
             Continue With AI

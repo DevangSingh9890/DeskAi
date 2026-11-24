@@ -21,10 +21,11 @@ import {
   sendAgentChatMessage,
 } from '../services/api'
 import type { PerformanceStatus } from '../services/api'
-import type { ChatMessage } from '../types/chat'
+import type { AgentRefinementContext, ChatMessage } from '../types/chat'
 import type { TicketCreateRequest, TicketPriority } from '../types/ticket'
 import {
   approveTicket,
+  createTicket,
   getTicketErrorMessage,
 } from '../services/ticketService'
 import {
@@ -90,6 +91,48 @@ function getTicketDetails(message: ChatMessage): TicketCreateRequest | undefined
   }
 }
 
+function buildRefinementContext(
+  messages: ChatMessage[],
+): AgentRefinementContext {
+  const conversationHistory = messages
+    .filter((message) => message.id !== 'welcome')
+    .slice(-10)
+    .map((message) => ({
+      role: message.role,
+      content: message.content.slice(0, 2000),
+      ...(message.satisfaction ? { satisfaction: message.satisfaction } : {}),
+    }))
+
+  const previousAnswer = [...messages]
+    .reverse()
+    .find(
+      (message) =>
+        message.role === 'assistant' &&
+        message.satisfaction === 'not_helpful' &&
+        message.agentResponse,
+    )
+  const response = previousAnswer?.agentResponse
+  const originalQuestion = messages.find((message) => message.role === 'user')
+  return {
+    original_question:
+      originalQuestion?.content ?? previousAnswer?.originalUserMessage ?? '',
+    previous_response: previousAnswer?.content ?? '',
+    conversation_history: conversationHistory,
+    classification: response?.classification ?? {},
+    troubleshooting: response?.troubleshooting ?? {},
+    knowledge_sources: response?.knowledge_sources?.slice(0, 8) ?? [],
+    knowledge_results:
+      response?.knowledge_results?.slice(0, 4).map((item) => ({
+        content: item.content.slice(0, 1200),
+        metadata: item.metadata,
+        score: item.score,
+      })) ?? [],
+    ticket_recommendation: response?.ticket_recommendation ?? null,
+    similar_tickets: response?.similar_tickets?.slice(0, 5) ?? [],
+      ticket_status: response?.ticket_status ?? null,
+  }
+}
+
 export function Dashboard() {
   const [activeView, setActiveView] = useState<'chat' | 'tickets'>('chat')
   const [handoffConversationId, setHandoffConversationId] = useState<string | null>(null)
@@ -99,6 +142,8 @@ export function Dashboard() {
   const [handoffError, setHandoffError] = useState<string | null>(null)
   const [ticketsRefreshKey, setTicketsRefreshKey] = useState(0)
   const [messages, setMessages] = useState<ChatMessage[]>([greeting])
+  const [dissatisfactionCount, setDissatisfactionCount] = useState(0)
+  const [awaitingClarification, setAwaitingClarification] = useState(false)
   const [draft, setDraft] = useState('')
   const [isChatLoading, setIsChatLoading] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
@@ -298,6 +343,10 @@ export function Dashboard() {
   async function handleSend() {
     const message = draft.trim()
     if (!message || isChatLoading) return
+    const isClarification = awaitingClarification
+    const refinementContext = isClarification
+      ? buildRefinementContext(messages)
+      : undefined
 
     setMessages((currentMessages) => [
       ...currentMessages,
@@ -310,29 +359,12 @@ export function Dashboard() {
     ])
     setDraft('')
     setChatError(null)
+    setAwaitingClarification(false)
     setIsChatLoading(true)
 
     try {
-      const result = await sendAgentChatMessage(message)
+      const result = await sendAgentChatMessage(message, refinementContext)
       const completedAt = new Date()
-      const escalationContext = [
-        result.response ?? '',
-        result.troubleshooting?.escalation_recommendation ?? '',
-      ].join(' ')
-      const noTroubleshootingSteps =
-        !(result.troubleshooting?.troubleshooting_steps ?? []).some((step) =>
-          step.trim(),
-        )
-      const escalationRecommended =
-        noTroubleshootingSteps &&
-        /\b(escalat|service desk|support engineer|human support|contact support|contact the service desk|provide more details|collect more details)\b/i.test(
-          escalationContext,
-        )
-      const needsHumanSupport =
-        !(result.knowledge_results?.length || result.knowledge_sources?.length) ||
-        /could not find|no useful answer|unable to help/i.test(result.response ?? '') ||
-        /\b(human|real person|support engineer|representative|live agent)\b/i.test(message) ||
-        escalationRecommended
       setMessages((currentMessages) => [
         ...currentMessages,
         {
@@ -340,16 +372,75 @@ export function Dashboard() {
           role: 'assistant',
           content: result.response ?? '',
           agentResponse: result,
-          originalUserMessage: message,
+          originalUserMessage: refinementContext
+            ? `${refinementContext.original_question}\n\nClarification: ${message}`
+            : message,
           timestamp: completedAt,
-          handoffRecommended: needsHumanSupport,
         },
       ])
     } catch (error: unknown) {
       setChatError(getChatErrorMessage(error))
+      if (isClarification) setAwaitingClarification(true)
     } finally {
       setIsChatLoading(false)
     }
+  }
+
+  function handleAnswerFeedback(messageId: string, helpful: boolean) {
+    const answer = messages.find(
+      (message) => message.id === messageId && message.agentResponse,
+    )
+    if (!answer?.agentResponse) return
+
+    setMessages((currentMessages) =>
+      currentMessages.map((message) =>
+        message.id === messageId
+          ? { ...message, satisfaction: helpful ? 'helpful' : 'not_helpful' }
+          : message,
+      ),
+    )
+
+    if (helpful) {
+      setDissatisfactionCount(0)
+      setAwaitingClarification(false)
+      return
+    }
+
+    const nextDissatisfactionCount = dissatisfactionCount + 1
+    setDissatisfactionCount(nextDissatisfactionCount)
+    if (nextDissatisfactionCount === 1) {
+      setAwaitingClarification(true)
+      setMessages((currentMessages) => [
+        ...currentMessages,
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content:
+            "I’m sorry the solution did not resolve the issue.\n\nPlease tell me what is still not working or provide additional details.",
+          timestamp: new Date(),
+        },
+      ])
+      return
+    }
+
+    setAwaitingClarification(false)
+    setMessages((currentMessages) => [
+      ...currentMessages,
+      {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content:
+          'I’m sorry, but I have not been able to resolve this issue.',
+        agentResponse: answer.agentResponse,
+        originalUserMessage:
+          messages.find((message) => message.role === 'user')?.content ??
+          answer.originalUserMessage ??
+          answer.content,
+        createdTicket: answer.createdTicket,
+        timestamp: new Date(),
+        handoffRecommended: true,
+      },
+    ])
   }
 
   async function handleHandoff(messageId: string) {
@@ -359,42 +450,92 @@ export function Dashboard() {
 
     setIsHandoffPending(true)
     setHandoffError(null)
-    const conversationMessages: CreateHandoffRequest['messages'] = messages.map(
-      (message) => ({
-        role: message.role,
-        content: message.content,
-        timestamp: message.timestamp.toISOString(),
-        metadata: {
-          ...(message.agentResponse ? { agent_response: message.agentResponse } : {}),
-          ...(message.classification ? { classification: message.classification } : {}),
-          ...(message.originalUserMessage
-            ? { original_user_message: message.originalUserMessage }
-            : {}),
-          ...(message.createdTicket ? { ticket_data: message.createdTicket } : {}),
-        },
-      }),
-    )
-    const classification = sourceMessage.agentResponse.classification
-    const ticketData =
-      sourceMessage.createdTicket ?? getTicketDetails(sourceMessage) ?? null
-    const payload: CreateHandoffRequest = {
-      messages: conversationMessages,
-      context: {
-        classification: classification ?? null,
-        knowledge_sources: sourceMessage.agentResponse.knowledge_sources ?? [],
-        knowledge_results: sourceMessage.agentResponse.knowledge_results ?? [],
-        troubleshooting: sourceMessage.agentResponse.troubleshooting ?? null,
-        ticket_recommendation:
-          sourceMessage.agentResponse.ticket_recommendation ?? null,
-        similar_tickets: sourceMessage.agentResponse.similar_tickets ?? [],
-        ticket_data: ticketData,
-      },
-      ticket_id: sourceMessage.createdTicket?.ticket_id ?? null,
-      priority: classification?.priority ?? 'Medium',
-      category: classification?.category ?? 'Unclassified',
-    }
-
     try {
+      let ticket = sourceMessage.createdTicket
+      if (!ticket) {
+        const ticketRequest = getTicketDetails(sourceMessage)
+        if (!ticketRequest) {
+          setHandoffError(
+            'I could not prepare a support ticket from this conversation. Please try again.',
+          )
+          return
+        }
+
+        try {
+          ticket = await createTicket(ticketRequest)
+        } catch (error: unknown) {
+          setHandoffError(
+            `The support ticket could not be created: ${getTicketErrorMessage(error)}`,
+          )
+          return
+        }
+        setTicketsRefreshKey((currentKey) => currentKey + 1)
+        setMessages((currentMessages) =>
+          currentMessages.map((message) =>
+            message.id === sourceMessage.id
+              ? { ...message, createdTicket: ticket }
+              : message,
+          ),
+        )
+      }
+
+      const conversationMessages: CreateHandoffRequest['messages'] = messages.map(
+        (message) => ({
+          role: message.role,
+          content: message.content,
+          timestamp: message.timestamp.toISOString(),
+          metadata: {
+            ...(message.agentResponse
+              ? { agent_response: message.agentResponse }
+              : {}),
+            ...(message.classification
+              ? { classification: message.classification }
+              : {}),
+            ...(message.originalUserMessage
+              ? { original_user_message: message.originalUserMessage }
+              : {}),
+            ...(message.createdTicket
+              ? { ticket_data: message.createdTicket }
+              : {}),
+            ...(message.id === sourceMessage.id && ticket
+              ? { ticket_data: ticket }
+              : {}),
+            ...(message.satisfaction
+              ? { satisfaction_feedback: message.satisfaction }
+              : {}),
+            ...(message.handoffRecommended
+              ? { escalation_reason: 'Repeated negative answer feedback.' }
+              : {}),
+          },
+        }),
+      )
+      const classification = sourceMessage.agentResponse.classification
+      const payload: CreateHandoffRequest = {
+        messages: conversationMessages,
+        context: {
+          classification: classification ?? null,
+          knowledge_sources: sourceMessage.agentResponse.knowledge_sources ?? [],
+          knowledge_results: sourceMessage.agentResponse.knowledge_results ?? [],
+          troubleshooting: sourceMessage.agentResponse.troubleshooting ?? null,
+          ticket_recommendation:
+            sourceMessage.agentResponse.ticket_recommendation ?? null,
+          similar_tickets: sourceMessage.agentResponse.similar_tickets ?? [],
+          ticket_data: ticket,
+          dissatisfaction_count: dissatisfactionCount,
+          feedback_history: messages
+            .filter((message) => message.satisfaction)
+            .map((message) => ({
+              role: message.role,
+              content: message.content,
+              satisfaction: message.satisfaction,
+            })),
+          escalation_reason: 'The user marked two AI responses as not helpful.',
+        },
+        ticket_id: ticket?.ticket_id ?? null,
+        priority: classification?.priority ?? 'Medium',
+        category: classification?.category ?? 'Unclassified',
+      }
+
       const created = await createHandoff(payload)
       window.localStorage.setItem(
         'deskai-human-support-conversation',
@@ -418,6 +559,8 @@ export function Dashboard() {
   }
 
   function handleContinueWithAI(messageId: string) {
+    setDissatisfactionCount(0)
+    setAwaitingClarification(false)
     setMessages((currentMessages) =>
       currentMessages.map((message) =>
         message.id === messageId
@@ -717,6 +860,7 @@ export function Dashboard() {
               onTicketDecision={(messageId, approved) =>
                 void handleTicketDecision(messageId, approved)
               }
+              onAnswerFeedback={handleAnswerFeedback}
               onHandoff={(messageId) => void handleHandoff(messageId)}
               onContinueWithAI={handleContinueWithAI}
               handoffPending={isHandoffPending}

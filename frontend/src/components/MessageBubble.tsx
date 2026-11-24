@@ -1,10 +1,12 @@
 import type { ChatMessage } from '../types/chat'
+import { SatisfactionWidget } from './SatisfactionWidget'
 import { TicketRecommendationCard } from './TicketRecommendationCard'
 import { TransferToHumanCard } from './TransferToHumanCard'
 
 interface MessageBubbleProps {
   message: ChatMessage
   onTicketDecision: (messageId: string, approved: boolean) => void
+  onAnswerFeedback: (messageId: string, helpful: boolean) => void
   onHandoff: (messageId: string) => void
   onContinueWithAI: (messageId: string) => void
   handoffPending: boolean
@@ -24,6 +26,7 @@ function AssistantMark() {
 export function MessageBubble({
   message,
   onTicketDecision,
+  onAnswerFeedback,
   onHandoff,
   onContinueWithAI,
   handoffPending,
@@ -65,7 +68,15 @@ export function MessageBubble({
         <div className={`message-bubble ${isAssistant ? 'message-bubble--assistant' : 'message-bubble--user'}`}>
           {message.content}
         </div>
-        {isAssistant && message.agentResponse && (
+        {isAssistant &&
+          message.agentResponse &&
+          !message.handoffRecommended &&
+          !message.satisfaction && (
+            <SatisfactionWidget
+              onFeedback={(helpful) => onAnswerFeedback(message.id, helpful)}
+            />
+          )}
+        {isAssistant && message.agentResponse && !message.handoffRecommended && (
           <TicketRecommendationCard
             recommendation={message.agentResponse.ticket_recommendation}
             status={message.agentResponse.ticket_status}

@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from app.main import app
 from app.agents.troubleshooting_agent import TroubleshootingResult
 from app.models.classification import IncidentClassification
+from app.services.groq_service import GroqTimeoutError
 from app.graphs.service_desk_graph import run_service_desk_graph
 
 
@@ -91,6 +92,93 @@ class ServiceDeskGraphTests(unittest.TestCase):
         troubleshooter.assert_called_once()
         ticket_agent.assert_called_once()
         self.assertIn("Graph Completed", "\n".join(logs.output))
+
+    def test_refinement_reuses_context_without_running_agent_graph_or_rag(self) -> None:
+        refinement_context = {
+            "original_question": "Help me reset my password.",
+            "previous_response": "Use the password reset page.",
+            "conversation_history": [
+                {"role": "user", "content": "Help me reset my password."},
+                {
+                    "role": "assistant",
+                    "content": "Use the password reset page.",
+                    "satisfaction": "not_helpful",
+                },
+            ],
+            "classification": {
+                "issue": "Password reset",
+                "category": "Access Management",
+                "subcategory": "Password Reset",
+            },
+            "troubleshooting": {"troubleshooting_steps": ["Open the reset page."]},
+            "knowledge_sources": ["Password Guide.pdf"],
+            "knowledge_results": [
+                {
+                    "content": "Select Forgot Password on the sign-in page.",
+                    "metadata": {"filename": "Password Guide.pdf"},
+                    "score": 0.9,
+                }
+            ],
+            "ticket_recommendation": None,
+            "similar_tickets": [],
+        }
+
+        with (
+            patch(
+                "app.routes.chat.generate_refined_response",
+                return_value="Try the Forgot Password link on the sign-in page.",
+            ) as refine,
+            patch("app.routes.chat.run_service_desk_graph") as graph,
+            patch("app.agents.knowledge_agent.search_knowledge") as search,
+        ):
+            response = self.client.post(
+                "/api/agent/chat",
+                json={
+                    "message": "I still cannot reset my password.",
+                    "refinement_context": refinement_context,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(
+            body["response"],
+            "Try the Forgot Password link on the sign-in page.",
+        )
+        self.assertEqual(
+            body["knowledge_sources"],
+            ["Password Guide.pdf"],
+        )
+        self.assertEqual(
+            body["classification"]["category"],
+            "Access Management",
+        )
+        refine.assert_called_once()
+        self.assertEqual(
+            refine.call_args.args[0],
+            "I still cannot reset my password.",
+        )
+        graph.assert_not_called()
+        search.assert_not_called()
+
+    def test_refinement_timeout_returns_specific_gateway_timeout(self) -> None:
+        with patch(
+            "app.routes.chat.generate_refined_response",
+            side_effect=GroqTimeoutError("Groq timed out"),
+        ):
+            response = self.client.post(
+                "/api/agent/chat",
+                json={
+                    "message": "I still cannot reset my password.",
+                    "refinement_context": {
+                        "original_question": "Help me reset my password.",
+                        "previous_response": "Use the reset page.",
+                    },
+                },
+            )
+
+        self.assertEqual(response.status_code, 504)
+        self.assertIn("25-second request limit", response.json()["detail"])
 
     def test_explicit_ticket_request_returns_approval_recommendation(self) -> None:
         message = "My laptop won't turn on. Please create a support ticket."

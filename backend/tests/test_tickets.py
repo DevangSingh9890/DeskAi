@@ -91,9 +91,7 @@ class TicketServiceTests(unittest.TestCase):
         restarted_service = TicketService(TicketRepository(self.session_factory))
         ticket = restarted_service.approve_ticket(approval_id, self.message)
 
-        self.assertEqual(ticket.ticket_id, "INC-00001")
-        self.assertEqual(ticket.ticket_type, "incident")
-        self.assertEqual(ticket.ticket_number, "INC-00001")
+        self.assertEqual(ticket.ticket_id, "INC-10001")
         self.assertEqual(ticket.status, "Open")
         self.assertEqual(ticket.assigned_group, "Network Support")
         with self.assertRaises(PendingApprovalNotFoundError):
