@@ -18,7 +18,7 @@ export function ApprovalCard({
   if (state === 'rejected') {
     return (
       <div className="ticket-approval-result ticket-approval-result--rejected" role="status">
-        Ticket recommendation declined.
+        No ticket was created.
       </div>
     )
   }
@@ -33,7 +33,7 @@ export function ApprovalCard({
           onClick={onApprove}
           disabled={isBusy}
         >
-          {state === 'approving' ? 'Creating ticket…' : 'Approve Ticket'}
+          {state === 'approving' ? 'Creating ticket…' : 'Create Ticket'}
         </button>
         <button
           className="ticket-button ticket-button--reject"
@@ -41,14 +41,14 @@ export function ApprovalCard({
           onClick={onReject}
           disabled={isBusy}
         >
-          {state === 'rejecting' ? 'Declining…' : 'Reject'}
+          {state === 'rejecting' ? 'Updating…' : 'Not now'}
         </button>
       </div>
       {isBusy && (
         <p className="ticket-approval-progress" role="status">
           {state === 'approving'
-            ? 'Creating the approved incident…'
-            : 'Saving your decision…'}
+            ? 'Creating your support ticket…'
+            : 'Updating your request…'}
         </p>
       )}
     </div>

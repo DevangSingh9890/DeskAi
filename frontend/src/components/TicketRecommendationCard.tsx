@@ -1,7 +1,4 @@
 import type {
-  AgentClassification,
-} from '../types/chat'
-import type {
   Ticket,
   TicketApprovalState,
   TicketRecommendation,
@@ -15,7 +12,6 @@ import { TicketStatusCard } from './TicketStatusCard'
 
 interface TicketRecommendationCardProps {
   recommendation?: TicketRecommendation | null
-  classification?: AgentClassification | null
   status?: TicketStatusInfo | null
   similarTickets?: SimilarTicket[] | null
   approvalState?: TicketApprovalState
@@ -27,7 +23,6 @@ interface TicketRecommendationCardProps {
 
 export function TicketRecommendationCard({
   recommendation,
-  classification,
   status,
   similarTickets,
   approvalState = 'pending',
@@ -50,8 +45,6 @@ export function TicketRecommendationCard({
     return null
   }
 
-  const isHighPriority =
-    classification?.priority === 'High' || classification?.priority === 'Critical'
   const canApprove =
     recommendation.ticket_recommended &&
     recommendation.requires_approval &&
@@ -62,38 +55,18 @@ export function TicketRecommendationCard({
       <div className="ticket-recommendation-heading">
         <span className="ticket-recommendation-icon" aria-hidden="true">✦</span>
         <div>
-          <p className="ticket-eyebrow">TICKET RECOMMENDATION</p>
-          <h3>
-            {!recommendation.ticket_recommended
-              ? 'Ticket request needs more information'
-              : isHighPriority
-                ? 'High Priority Incident Detected'
-                : 'Incident Tracking Recommended'}
-          </h3>
+          <p className="ticket-eyebrow">SUPPORT</p>
+          <h3>{recommendation.ticket_recommended ? 'Create a support ticket?' : 'More information needed'}</h3>
         </div>
       </div>
       <p
         className="ticket-recommendation-reason"
         role={recommendation.ticket_recommended ? undefined : 'status'}
       >
-        {recommendation.reason}
+        {recommendation.ticket_recommended
+          ? 'Would you like me to create a support ticket for this request?'
+          : 'I need a little more information before I can create a support ticket. Please add a few details about the issue.'}
       </p>
-      {recommendation.ticket_recommended && (
-        <p className="ticket-recommendation-action">
-          <span>Recommended Action</span>
-          <strong>Create Incident</strong>
-        </p>
-      )}
-      {classification && (
-        <div className="ticket-recommendation-meta">
-          {classification.priority && (
-            <span className={`ticket-priority-pill ticket-priority-pill--${classification.priority.toLowerCase()}`}>
-              {classification.priority} priority
-            </span>
-          )}
-          {classification.assigned_group && <span>{classification.assigned_group}</span>}
-        </div>
-      )}
       {createdTicket ? (
         <TicketCreatedCard ticket={createdTicket} />
       ) : canApprove ? (
@@ -105,7 +78,7 @@ export function TicketRecommendationCard({
         />
       ) : recommendation.ticket_recommended ? (
         <p className="ticket-inline-error" role="alert">
-          Approval details are unavailable. Please submit the request again.
+          I couldn’t prepare the ticket yet. Please try again.
         </p>
       ) : null}
     </section>

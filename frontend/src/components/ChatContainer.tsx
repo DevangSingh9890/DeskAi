@@ -1,12 +1,10 @@
 import { useEffect, useRef } from 'react'
 import type { ChatMessage } from '../types/chat'
-import { AgentWorkflowCard } from './AgentWorkflowCard'
 import { MessageBubble } from './MessageBubble'
 
 interface ChatContainerProps {
   messages: ChatMessage[]
   isLoading: boolean
-  agentProgress: number | null
   error: string | null
   onSelectSuggestion: (value: string) => void
   onTicketDecision: (messageId: string, approved: boolean) => void
@@ -23,7 +21,7 @@ const suggestions = [
   'My laptop is running slowly',
 ]
 
-function AgentProgressIndicator({ activeStep }: { activeStep: number }) {
+function ThinkingIndicator() {
   return (
     <div className="message-row message-row--assistant">
       <div className="message-avatar message-avatar--assistant" aria-hidden="true">
@@ -33,10 +31,20 @@ function AgentProgressIndicator({ activeStep }: { activeStep: number }) {
       </div>
       <div className="message-content message-content--agent">
         <div className="message-meta">
-          <span className="message-author">DeskAI Agent Team</span>
-          <span className="message-time">Working on your request</span>
+          <span className="message-author">DeskAI Assistant</span>
         </div>
-        <AgentWorkflowCard activeStep={activeStep} />
+        <div
+          className="message-bubble message-bubble--assistant thinking-indicator"
+          role="status"
+          aria-live="polite"
+        >
+          <span>DeskAI is thinking...</span>
+          <span className="thinking-indicator__dots" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+        </div>
       </div>
     </div>
   )
@@ -45,7 +53,6 @@ function AgentProgressIndicator({ activeStep }: { activeStep: number }) {
 export function ChatContainer({
   messages,
   isLoading,
-  agentProgress,
   error,
   onSelectSuggestion,
   onTicketDecision,
@@ -124,7 +131,7 @@ export function ChatContainer({
         )}
 
         {isLoading && (
-          <AgentProgressIndicator activeStep={agentProgress ?? 0} />
+          <ThinkingIndicator />
         )}
         <div ref={endOfMessagesRef} />
       </div>

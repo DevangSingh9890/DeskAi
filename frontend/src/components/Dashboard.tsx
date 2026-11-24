@@ -101,7 +101,6 @@ export function Dashboard() {
   const [messages, setMessages] = useState<ChatMessage[]>([greeting])
   const [draft, setDraft] = useState('')
   const [isChatLoading, setIsChatLoading] = useState(false)
-  const [agentProgress, setAgentProgress] = useState<number | null>(null)
   const [chatError, setChatError] = useState<string | null>(null)
   const [documents, setDocuments] = useState<DocumentSummary[]>([])
   const [performanceStatus, setPerformanceStatus] =
@@ -312,13 +311,6 @@ export function Dashboard() {
     setDraft('')
     setChatError(null)
     setIsChatLoading(true)
-    setAgentProgress(0)
-    const startedAt = performance.now()
-    const progressTimer = window.setInterval(() => {
-      setAgentProgress((currentStep) =>
-        currentStep === null ? 0 : Math.min(currentStep + 1, 3),
-      )
-    }, 2200)
 
     try {
       const result = await sendAgentChatMessage(message)
@@ -348,7 +340,6 @@ export function Dashboard() {
           role: 'assistant',
           content: result.response ?? '',
           agentResponse: result,
-          workflowDurationMs: performance.now() - startedAt,
           originalUserMessage: message,
           timestamp: completedAt,
           handoffRecommended: needsHumanSupport,
@@ -357,8 +348,6 @@ export function Dashboard() {
     } catch (error: unknown) {
       setChatError(getChatErrorMessage(error))
     } finally {
-      window.clearInterval(progressTimer)
-      setAgentProgress(null)
       setIsChatLoading(false)
     }
   }
@@ -723,7 +712,6 @@ export function Dashboard() {
             <ChatContainer
               messages={messages}
               isLoading={isChatLoading}
-              agentProgress={agentProgress}
               error={chatError}
               onSelectSuggestion={setDraft}
               onTicketDecision={(messageId, approved) =>

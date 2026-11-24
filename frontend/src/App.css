@@ -939,6 +939,47 @@
   box-shadow: 0 4px 10px rgba(103, 113, 216, 0.14);
 }
 
+.thinking-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #667085;
+}
+
+.thinking-indicator__dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.thinking-indicator__dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #7772c3;
+  animation: thinking-dot 1.2s ease-in-out infinite;
+}
+
+.thinking-indicator__dots span:nth-child(2) {
+  animation-delay: 150ms;
+}
+
+.thinking-indicator__dots span:nth-child(3) {
+  animation-delay: 300ms;
+}
+
+@keyframes thinking-dot {
+  0%, 60%, 100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
 .message-content--agent {
   width: min(94%, 980px);
   max-width: none;

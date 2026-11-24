@@ -15,7 +15,6 @@ export interface ChatMessage {
   timestamp: Date
   classification?: IncidentClassification
   agentResponse?: AgentChatResponse
-  workflowDurationMs?: number
   originalUserMessage?: string
   ticketApprovalState?: TicketApprovalState
   ticketApprovalError?: string

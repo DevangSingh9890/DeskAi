@@ -1,10 +1,5 @@
 import type { ChatMessage } from '../types/chat'
 import { TicketRecommendationCard } from './TicketRecommendationCard'
-import { AgentWorkflowCard } from './AgentWorkflowCard'
-import { ClassificationCard } from './ClassificationCard'
-import { KnowledgeSourcesCard } from './KnowledgeSourcesCard'
-import { RecommendationCard } from './RecommendationCard'
-import { TroubleshootingCard } from './TroubleshootingCard'
 import { TransferToHumanCard } from './TransferToHumanCard'
 
 interface MessageBubbleProps {
@@ -36,6 +31,11 @@ export function MessageBubble({
   handoffExists,
 }: MessageBubbleProps) {
   const isAssistant = message.role === 'assistant'
+  const showTransferCard =
+    isAssistant &&
+    message.handoffRecommended &&
+    !message.handoffDismissed &&
+    !handoffExists
 
   return (
     <article
@@ -62,64 +62,28 @@ export function MessageBubble({
             })}
           </time>
         </div>
-        {isAssistant && message.agentResponse ? (
-          <>
-            <AgentWorkflowCard
-              completedAt={message.timestamp}
-              durationMs={message.workflowDurationMs}
-            />
-            <div className="agent-result-grid">
-              <ClassificationCard
-                classification={message.agentResponse.classification}
-              />
-              <KnowledgeSourcesCard
-                sources={message.agentResponse.knowledge_sources}
-              />
-              <TroubleshootingCard
-                troubleshooting={message.agentResponse.troubleshooting}
-              />
-              <RecommendationCard
-                recommendedAction={
-                  message.agentResponse.recommended_action ??
-                  message.agentResponse.troubleshooting?.recommended_action ??
-                  message.agentResponse.troubleshooting?.escalation_recommendation
-                }
-                followUpSuggestions={
-                  message.agentResponse.follow_up_suggestions ??
-                  message.agentResponse.troubleshooting?.follow_up_suggestions
-                }
-                summary={message.agentResponse.summary ?? message.agentResponse.response ?? message.content}
-              />
-              <TicketRecommendationCard
-                recommendation={message.agentResponse.ticket_recommendation}
-                classification={message.agentResponse.classification}
-                status={message.agentResponse.ticket_status}
-                similarTickets={message.agentResponse.similar_tickets}
-                approvalState={message.ticketApprovalState}
-                approvalError={message.ticketApprovalError}
-                createdTicket={message.createdTicket}
-                onApprove={() => onTicketDecision(message.id, true)}
-                onReject={() => onTicketDecision(message.id, false)}
-              />
-            </div>
-            {message.handoffRecommended && !message.handoffDismissed && !handoffExists && (
-              <TransferToHumanCard
-                disabled={handoffPending}
-                error={handoffError}
-                onTransfer={() => onHandoff(message.id)}
-                onContinue={() => onContinueWithAI(message.id)}
-              />
-            )}
-          </>
-        ) : (
-          <>
-            <div className={`message-bubble ${isAssistant ? 'message-bubble--assistant' : 'message-bubble--user'}`}>
-              {message.content}
-            </div>
-            {isAssistant && message.classification && (
-              <ClassificationCard classification={message.classification} />
-            )}
-          </>
+        <div className={`message-bubble ${isAssistant ? 'message-bubble--assistant' : 'message-bubble--user'}`}>
+          {message.content}
+        </div>
+        {isAssistant && message.agentResponse && (
+          <TicketRecommendationCard
+            recommendation={message.agentResponse.ticket_recommendation}
+            status={message.agentResponse.ticket_status}
+            similarTickets={message.agentResponse.similar_tickets}
+            approvalState={message.ticketApprovalState}
+            approvalError={message.ticketApprovalError}
+            createdTicket={message.createdTicket}
+            onApprove={() => onTicketDecision(message.id, true)}
+            onReject={() => onTicketDecision(message.id, false)}
+          />
+        )}
+        {showTransferCard && (
+          <TransferToHumanCard
+            disabled={handoffPending}
+            error={handoffError}
+            onTransfer={() => onHandoff(message.id)}
+            onContinue={() => onContinueWithAI(message.id)}
+          />
         )}
       </div>
       {!isAssistant && (

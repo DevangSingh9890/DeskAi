@@ -10,7 +10,7 @@ export function TicketCreatedCard({ ticket }: TicketCreatedCardProps) {
       <div className="ticket-created-heading">
         <span className="ticket-created-check" aria-hidden="true">✓</span>
         <div>
-          <p>Ticket Created</p>
+          <p>Ticket created successfully</p>
           <h4>{displayTicketNumber(ticket)}</h4>
         </div>
       </div>
@@ -18,14 +18,6 @@ export function TicketCreatedCard({ ticket }: TicketCreatedCardProps) {
         <div>
           <dt>Status</dt>
           <dd><span className="ticket-status-pill ticket-status-pill--open">{ticket.status}</span></dd>
-        </div>
-        <div>
-          <dt>Assigned Group</dt>
-          <dd>{ticket.assigned_group}</dd>
-        </div>
-        <div>
-          <dt>Priority</dt>
-          <dd>{ticket.priority}</dd>
         </div>
       </dl>
     </section>
