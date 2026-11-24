@@ -1,4 +1,4 @@
-import type { Ticket } from '../types/ticket'
+import { displayTicketNumber, type Ticket } from '../types/ticket'
 
 interface TicketCreatedCardProps {
   ticket: Ticket
@@ -11,7 +11,7 @@ export function TicketCreatedCard({ ticket }: TicketCreatedCardProps) {
         <span className="ticket-created-check" aria-hidden="true">✓</span>
         <div>
           <p>Ticket Created</p>
-          <h4>{ticket.ticket_id}</h4>
+          <h4>{displayTicketNumber(ticket)}</h4>
         </div>
       </div>
       <dl className="ticket-created-details">

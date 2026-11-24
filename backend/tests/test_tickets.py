@@ -54,6 +54,33 @@ class TicketServiceTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.engine.dispose()
 
+    def test_service_request_receives_sequential_sr_number(self) -> None:
+        first = self.service.create_ticket(
+            TicketCreateRequest(
+                title="Install VS Code",
+                description="Please install VS Code for software development.",
+                priority="Medium",
+                category="Software",
+                subcategory="Installation",
+                assigned_group="Software Support",
+            )
+        )
+        second = self.service.create_ticket(
+            TicketCreateRequest(
+                title="Request VPN access",
+                description="Create VPN access for the new account.",
+                priority="Medium",
+                category="Access Management",
+                subcategory="VPN",
+                assigned_group="Identity & Access Management",
+            )
+        )
+
+        self.assertEqual(first.ticket_type, "service_request")
+        self.assertEqual(first.ticket_number, "SR-00001")
+        self.assertEqual(second.ticket_type, "service_request")
+        self.assertEqual(second.ticket_number, "SR-00002")
+
     def test_ticket_is_created_only_after_matching_approval(self) -> None:
         approval_id = self.service.request_ticket_approval(
             self.message,
@@ -64,7 +91,9 @@ class TicketServiceTests(unittest.TestCase):
         restarted_service = TicketService(TicketRepository(self.session_factory))
         ticket = restarted_service.approve_ticket(approval_id, self.message)
 
-        self.assertEqual(ticket.ticket_id, "INC-10001")
+        self.assertEqual(ticket.ticket_id, "INC-00001")
+        self.assertEqual(ticket.ticket_type, "incident")
+        self.assertEqual(ticket.ticket_number, "INC-00001")
         self.assertEqual(ticket.status, "Open")
         self.assertEqual(ticket.assigned_group, "Network Support")
         with self.assertRaises(PendingApprovalNotFoundError):

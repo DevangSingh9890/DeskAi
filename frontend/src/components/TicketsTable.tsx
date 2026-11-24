@@ -1,4 +1,4 @@
-import type { Ticket } from '../types/ticket'
+import { displayTicketNumber, type Ticket } from '../types/ticket'
 
 interface TicketsTableProps {
   tickets: Ticket[]
@@ -41,7 +41,7 @@ export function TicketsTable({
               className={selectedTicketId === ticket.ticket_id ? 'tickets-table-row--selected' : ''}
               key={ticket.ticket_id}
             >
-              <td><strong className="ticket-number">{ticket.ticket_id}</strong></td>
+              <td><strong className="ticket-number">{displayTicketNumber(ticket)}</strong></td>
               <td>
                 <span className="ticket-table-title">{ticket.title}</span>
                 <span className="ticket-table-category">{ticket.category} · {ticket.subcategory}</span>

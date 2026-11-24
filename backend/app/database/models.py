@@ -18,6 +18,12 @@ class TicketRecord(Base):
     ticket_id: Mapped[str] = mapped_column(
         String(32), unique=True, nullable=False, index=True
     )
+    ticket_type: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, index=True
+    )
+    ticket_number: Mapped[str | None] = mapped_column(
+        String(32), unique=True, nullable=True, index=True
+    )
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     category: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -45,6 +51,17 @@ class TicketRecord(Base):
     knowledge_sources: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     similar_incidents: Mapped[list[dict[str, Any]] | None] = mapped_column(
         JSON, nullable=True
+    )
+
+
+class TicketSequenceRecord(Base):
+    __tablename__ = "ticket_sequences"
+
+    ticket_type: Mapped[str] = mapped_column(
+        String(20), primary_key=True
+    )
+    last_number: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
     )
 
 

@@ -9,14 +9,19 @@ import type { HumanConversation, HumanChatMessage } from '../types/handoff'
 
 interface HumanChatWidgetProps {
   conversationId: string
+  initiallyMinimized?: boolean
   onClosed: (conversationId: string) => void
 }
 
-export function HumanChatWidget({ conversationId, onClosed }: HumanChatWidgetProps) {
+export function HumanChatWidget({
+  conversationId,
+  initiallyMinimized = false,
+  onClosed,
+}: HumanChatWidgetProps) {
   const [conversation, setConversation] = useState<HumanConversation | null>(null)
   const [messages, setMessages] = useState<HumanChatMessage[]>([])
   const [draft, setDraft] = useState('')
-  const [minimized, setMinimized] = useState(false)
+  const [minimized, setMinimized] = useState(initiallyMinimized)
   const [error, setError] = useState<string | null>(null)
   const [isSending, setIsSending] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)

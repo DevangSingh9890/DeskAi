@@ -8,6 +8,7 @@ import {
   updateAdminTicketStatus,
 } from '../services/adminTicketService'
 import { getTicketErrorMessage } from '../services/ticketService'
+import { displayTicketNumber } from '../types/ticket'
 import type {
   AdminTicketDetail,
   Ticket,
@@ -138,7 +139,7 @@ export function TicketDetailsDrawer({
         <header className="ticket-drawer-header">
           <div>
             <p className="ticket-eyebrow">INCIDENT DETAILS</p>
-            <h2 id="ticket-drawer-title">{ticket.ticket_id}</h2>
+            <h2 id="ticket-drawer-title">{displayTicketNumber(ticket)}</h2>
           </div>
           <button className="ticket-drawer-close" type="button" onClick={onClose} aria-label="Close details">
             ×
@@ -236,7 +237,7 @@ export function TicketDetailsDrawer({
                 <ul className="drawer-similar-list">
                   {current.similar_incidents.map((incident) => (
                     <li key={incident.ticket_id}>
-                      <strong>{incident.ticket_id}</strong>
+                      <strong>{incident.ticket_number ?? incident.ticket_id}</strong>
                       <span>{incident.summary} · {incident.category} · {incident.priority}</span>
                     </li>
                   ))}

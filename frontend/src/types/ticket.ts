@@ -15,6 +15,8 @@ export type TicketApprovalState =
 
 export interface Ticket {
   ticket_id: string
+  ticket_type: 'incident' | 'service_request' | null
+  ticket_number: string | null
   title: string
   description: string
   priority: TicketPriority
@@ -127,6 +129,7 @@ export interface TicketRecommendation {
 
 export interface SimilarTicket {
   ticket_id: string
+  ticket_number: string | null
   category: string
   priority: TicketPriority
   summary: string
@@ -138,6 +141,12 @@ export interface TicketStatusInfo {
   status: string
   assigned_group?: string | null
   updated_at?: string | null
+}
+
+export function displayTicketNumber(
+  ticket: Pick<Ticket, 'ticket_id' | 'ticket_number'>,
+): string {
+  return ticket.ticket_number ?? ticket.ticket_id
 }
 
 export interface TicketApprovalRequest {

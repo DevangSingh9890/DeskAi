@@ -15,6 +15,7 @@ from app.database.models import (
     TicketCommentRecord,
     TicketHistoryRecord,
     TicketRecord,
+    TicketSequenceRecord,
 )
 from app.models.ticket import (
     AdminTicketDetail,
@@ -32,6 +33,16 @@ from app.services.ticket_errors import (
 
 logger = logging.getLogger(__name__)
 SessionSource = Session | Callable[[], Session]
+INCIDENT_KEYWORDS = (
+    "issue", "error", "failed", "failure", "broken", "crash", "cannot",
+    "unable", "problem", "outage", "login issue", "vpn not working",
+    "application issue", "not working", "inaccessible", "degraded",
+)
+SERVICE_REQUEST_KEYWORDS = (
+    "request", "install", "installation", "access", "permission", "account",
+    "create", "onboarding", "software request", "hardware request",
+    "provision", "setup",
+)
 
 
 class TicketRepository:
@@ -303,6 +314,14 @@ class TicketRepository:
             return [
                 SimilarTicket(
                     ticket_id=record.ticket_id,
+                    ticket_number=(
+                        record.ticket_number
+                        or (
+                            record.ticket_id
+                            if record.ticket_id.startswith(("INC-", "SR-", "HUM-"))
+                            else None
+                        )
+                    ),
                     category=record.category,
                     priority=record.priority,
                     summary=record.title,
@@ -421,9 +440,56 @@ class TicketRepository:
             }
 
     @staticmethod
+    def _determine_ticket_type(request: TicketCreateRequest) -> str:
+        if request.ticket_type in ("incident", "service_request"):
+            return request.ticket_type
+
+        text = " ".join(
+            (
+                request.title,
+                request.description,
+                request.category,
+                request.subcategory,
+                request.ai_recommendation or "",
+            )
+        ).casefold()
+
+        if (
+            request.category.casefold() == "access management"
+            or "password reset" in text
+        ):
+            return "service_request"
+        if any(
+            keyword in text
+            for keyword in (
+                "install ",
+                "installation",
+                "software request",
+                "hardware request",
+                "request",
+                "permission",
+                "onboarding",
+                "provision",
+                "setup",
+            )
+        ):
+            return "service_request"
+        incident_matches = [
+            keyword for keyword in INCIDENT_KEYWORDS
+            if keyword in text
+        ]
+        if incident_matches:
+            return "incident"
+        if any(keyword in text for keyword in SERVICE_REQUEST_KEYWORDS):
+            return "service_request"
+        return "incident"
+
+    @staticmethod
     def _insert_ticket(session: Session, request: TicketCreateRequest) -> Ticket:
+        ticket_type = TicketRepository._determine_ticket_type(request)
         record = TicketRecord(
             ticket_id=f"PENDING-{token_urlsafe(12)}",
+            ticket_type=ticket_type,
             title=request.title,
             description=request.description,
             category=request.category,
@@ -441,7 +507,19 @@ class TicketRepository:
         )
         session.add(record)
         session.flush()
-        record.ticket_id = f"INC-{record.id + 10000:05d}"
+        prefix = "INC" if ticket_type == "incident" else "SR"
+        sequence = session.scalar(
+            select(TicketSequenceRecord)
+            .where(TicketSequenceRecord.ticket_type == ticket_type)
+            .with_for_update()
+        )
+        if sequence is None:
+            sequence = TicketSequenceRecord(ticket_type=ticket_type, last_number=0)
+            session.add(sequence)
+            session.flush()
+        sequence.last_number += 1
+        record.ticket_number = f"{prefix}-{sequence.last_number:05d}"
+        record.ticket_id = record.ticket_number
         session.flush()
         session.add(
             TicketHistoryRecord(
@@ -504,6 +582,19 @@ class TicketRepository:
     def _to_ticket(record: TicketRecord) -> Ticket:
         return Ticket(
             ticket_id=record.ticket_id,
+            ticket_type=(
+                record.ticket_type
+                if record.ticket_type in ("incident", "service_request")
+                else None
+            ),
+            ticket_number=(
+                record.ticket_number
+                or (
+                    record.ticket_id
+                    if record.ticket_id.startswith(("INC-", "SR-", "HUM-"))
+                    else None
+                )
+            ),
             title=record.title,
             description=record.description,
             priority=record.priority,

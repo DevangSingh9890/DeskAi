@@ -1,4 +1,4 @@
-import type { Ticket, TicketStatusInfo } from '../types/ticket'
+import { displayTicketNumber, type Ticket, type TicketStatusInfo } from '../types/ticket'
 
 interface TicketStatusCardProps {
   ticket?: Ticket
@@ -14,7 +14,7 @@ function formatDate(value: string | null | undefined): string | null {
 }
 
 export function TicketStatusCard({ ticket, status }: TicketStatusCardProps) {
-  const ticketId = ticket?.ticket_id ?? status?.ticket_id
+  const ticketId = ticket ? displayTicketNumber(ticket) : status?.ticket_id
   if (!ticketId) return null
 
   const currentStatus = ticket?.status ?? status?.status ?? 'Unknown'

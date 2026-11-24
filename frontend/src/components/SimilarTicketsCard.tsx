@@ -21,7 +21,7 @@ export function SimilarTicketsCard({ tickets }: SimilarTicketsCardProps) {
           {tickets.map((ticket) => (
             <li key={ticket.ticket_id}>
               <div className="similar-ticket-title">
-                <strong>{ticket.ticket_id}</strong>
+                <strong>{ticket.ticket_number ?? ticket.ticket_id}</strong>
                 <span className={`ticket-priority-pill ticket-priority-pill--${ticket.priority.toLowerCase()}`}>
                   {ticket.priority}
                 </span>

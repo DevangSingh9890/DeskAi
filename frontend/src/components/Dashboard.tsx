@@ -93,6 +93,7 @@ function getTicketDetails(message: ChatMessage): TicketCreateRequest | undefined
 export function Dashboard() {
   const [activeView, setActiveView] = useState<'chat' | 'tickets'>('chat')
   const [handoffConversationId, setHandoffConversationId] = useState<string | null>(null)
+  const [handoffRestored, setHandoffRestored] = useState(false)
   const [showHandoffPopup, setShowHandoffPopup] = useState(false)
   const [isHandoffPending, setIsHandoffPending] = useState(false)
   const [handoffError, setHandoffError] = useState<string | null>(null)
@@ -142,6 +143,7 @@ export function Dashboard() {
           clearStoredConversation()
           return
         }
+        setHandoffRestored(true)
         setHandoffConversationId(savedConversationId)
       } catch (error: unknown) {
         if (!active) return
@@ -321,10 +323,24 @@ export function Dashboard() {
     try {
       const result = await sendAgentChatMessage(message)
       const completedAt = new Date()
+      const escalationContext = [
+        result.response ?? '',
+        result.troubleshooting?.escalation_recommendation ?? '',
+      ].join(' ')
+      const noTroubleshootingSteps =
+        !(result.troubleshooting?.troubleshooting_steps ?? []).some((step) =>
+          step.trim(),
+        )
+      const escalationRecommended =
+        noTroubleshootingSteps &&
+        /\b(escalat|service desk|support engineer|human support|contact support|contact the service desk|provide more details|collect more details)\b/i.test(
+          escalationContext,
+        )
       const needsHumanSupport =
         !(result.knowledge_results?.length || result.knowledge_sources?.length) ||
         /could not find|no useful answer|unable to help/i.test(result.response ?? '') ||
-        /\b(human|real person|support engineer|representative|live agent)\b/i.test(message)
+        /\b(human|real person|support engineer|representative|live agent)\b/i.test(message) ||
+        escalationRecommended
       setMessages((currentMessages) => [
         ...currentMessages,
         {
@@ -396,6 +412,7 @@ export function Dashboard() {
         created.conversation_id,
       )
       setHandoffConversationId(created.conversation_id)
+      setHandoffRestored(false)
       setShowHandoffPopup(true)
       setMessages((currentMessages) =>
         currentMessages.map((message) =>
@@ -431,6 +448,7 @@ export function Dashboard() {
     setHandoffConversationId((currentId) =>
       currentId === conversationId ? null : currentId,
     )
+    setHandoffRestored(false)
     setShowHandoffPopup(false)
   }, [])
 
@@ -745,6 +763,7 @@ export function Dashboard() {
       {handoffConversationId && (
         <HumanChatWidget
           conversationId={handoffConversationId}
+          initiallyMinimized={handoffRestored}
           onClosed={handleHandoffClosed}
         />
       )}

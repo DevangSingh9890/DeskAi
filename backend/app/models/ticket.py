@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 TicketPriority = Literal["Critical", "High", "Medium", "Low"]
 TicketStatus = Literal["Open", "In Progress", "Resolved", "Closed"]
+TicketType = Literal["incident", "service_request"]
 
 
 class TicketCreateRequest(BaseModel):
@@ -21,6 +22,7 @@ class TicketCreateRequest(BaseModel):
     ai_recommendation: str | None = Field(default=None, max_length=4000)
     knowledge_sources: list[str] = Field(default_factory=list, max_length=20)
     similar_incidents: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
+    ticket_type: TicketType | None = None
 
 
 class TicketUpdateRequest(BaseModel):
@@ -38,6 +40,8 @@ class TicketUpdateRequest(BaseModel):
 
 class Ticket(BaseModel):
     ticket_id: str
+    ticket_type: TicketType | None = None
+    ticket_number: str | None = None
     title: str
     description: str
     priority: TicketPriority
@@ -145,6 +149,7 @@ class TicketStatusResponse(BaseModel):
 
 class SimilarTicket(BaseModel):
     ticket_id: str
+    ticket_number: str | None = None
     category: str
     priority: TicketPriority
     summary: str
