@@ -51,6 +51,29 @@ class ChatRouteTests(unittest.TestCase):
             {"status": "running", "service": "AI Service Desk Backend"},
         )
 
+    def test_debug_chroma_reports_persistence_diagnostics(self) -> None:
+        diagnostics = {
+            "persist_directory": "D:/backend/chroma_db",
+            "collection_name": "deskai_knowledge",
+            "total_collections": 1,
+            "collection_names": ["deskai_knowledge"],
+            "vector_count": 245,
+            "document_count": 12,
+            "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+            "indexed_metadata_document_count": 12,
+            "missing_vector_document_count": 0,
+            "mismatched_chunk_document_count": 0,
+            "retriever_status": True,
+        }
+        with patch(
+            "app.routes.chat.get_chroma_diagnostics",
+            return_value=diagnostics,
+        ):
+            response = self.client.get("/api/debug/chroma")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), diagnostics)
+
     def test_debug_config_does_not_expose_api_key(self) -> None:
         response = self.client.get("/api/debug/config")
 
@@ -74,7 +97,7 @@ class ChatRouteTests(unittest.TestCase):
                     "embedding_model_loaded": True,
                     "warmup_started_at": "2026-11-16T00:00:00+00:00",
                     "warmup_completed_at": "2026-11-16T00:00:20+00:00",
-                    "warmup_status": "ready",
+                    "warmup_status": "completed",
                     "warmup_error": None,
                 },
             ),
@@ -95,7 +118,7 @@ class ChatRouteTests(unittest.TestCase):
                 "embedding_model_loaded": True,
                 "warmup_started_at": "2026-11-16T00:00:00+00:00",
                 "warmup_completed_at": "2026-11-16T00:00:20+00:00",
-                "warmup_status": "ready",
+                "warmup_status": "completed",
                 "warmup_error": None,
                 "model": settings.EMBEDDING_MODEL,
                 "model_loaded": True,
@@ -143,29 +166,35 @@ class ChatRouteTests(unittest.TestCase):
         with redirect_stdout(output):
             with patch("app.main.initialize_database") as initialize_database:
                 with patch(
-                    "app.services.rag_service.initialize_embedding_service"
-                ) as initialize:
+                    "app.main.initialize_vector_store"
+                ) as initialize_vector_store:
                     with patch(
-                        "app.services.rag_service.start_background_embedding_warmup"
-                    ) as start:
+                        "app.services.rag_service.initialize_embedding_service"
+                    ) as initialize:
                         with patch(
-                            "app.services.rag_service.EmbeddingService.get_model"
-                        ) as get_model:
+                            "app.main.start_background_embedding_warmup"
+                        ) as start:
                             with patch(
-                                "app.main.recover_interrupted_ingestions"
-                            ) as recover:
-                                with self.assertLogs("app.main", level="INFO") as logs:
-                                    with TestClient(app):
-                                        pass
+                                "app.services.rag_service.EmbeddingService.get_model"
+                            ) as get_model:
+                                with patch(
+                                    "app.main.recover_interrupted_ingestions"
+                                ) as recover:
+                                    with self.assertLogs(
+                                        "app.main", level="INFO"
+                                    ) as logs:
+                                        with TestClient(app):
+                                            pass
         initialize_database.assert_called_once_with()
+        initialize_vector_store.assert_called_once_with()
         initialize.assert_not_called()
         get_model.assert_not_called()
         recover.assert_called_once_with()
-        start.assert_not_called()
+        start.assert_called_once_with()
 
-        self.assertIn("Backend started", "\n".join(logs.output))
+        self.assertIn("Backend Started", "\n".join(logs.output))
+        self.assertIn("Embedding Warmup Started", "\n".join(logs.output))
         self.assertIn("Backend startup complete", "\n".join(logs.output))
-        self.assertIn("Embedding model not loaded yet", "\n".join(logs.output))
         self.assertIn(
             f"GROQ_API_KEY loaded: {'YES' if settings.GROQ_API_KEY else 'NO'}",
             output.getvalue(),

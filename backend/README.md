@@ -104,9 +104,10 @@ resolved relative to the backend directory. To prohibit Hub network access, set
 `HF_HUB_OFFLINE=1`; the backend will fail explicitly if the local model files
 are missing.
 
-Backend startup does not load the embedding model. The first document-indexing
-or semantic-search operation loads it once, and subsequent operations reuse it.
-The performance endpoint reports whether the model has loaded.
+Backend startup makes the API available without waiting for the embedding model.
+It then starts model warm-up in a background thread; indexing and search reuse
+the loaded model. `GET /api/debug/performance` reports `warming` while loading
+and `completed` once warm-up succeeds.
 
 To explicitly run or verify warm-up locally, set a private
 `ADMIN_API_KEY` and call the protected endpoint:
@@ -452,6 +453,12 @@ indexing after saving the file. LangChain loaders extract PDF, TXT, and DOCX tex
 200-character overlap. The local `HuggingFaceEmbeddings` integration loads once
 per process and embeds document chunks in batches. Chroma uses local persistent
 storage at `backend/chroma_db` by default, with anonymized telemetry disabled.
+FastAPI startup opens the configured persistent collection and verifies its
+vector count, stored document/chunk counts, and retriever query path. Startup
+logs the resolved directory and collection; an index mismatch is logged rather
+than silently repairing or re-indexing data. `GET /api/debug/chroma` reports the
+same integrity details. Deployments must keep `CHROMA_PERSIST_DIRECTORY` on a
+durable volume shared by backend restarts.
 FastAPI background tasks keep indexing out of the upload request; status is
 persisted with the document metadata and the frontend polls while processing.
 Jobs interrupted by a restart are marked failed with a retryable status.

@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _store: Any | None = None
+_chroma_client: Any | None = None
 _store_lock = Lock()
 _index_lock = RLock()
 _warmup_lock = Lock()
@@ -61,6 +62,10 @@ _TIMED_STAGE_LABELS: dict[IngestionStage, str] = {
 
 
 class VectorStoreError(RuntimeError):
+    pass
+
+
+class ChromaCollectionMissingError(VectorStoreError):
     pass
 
 
@@ -233,30 +238,97 @@ def document_index_lock() -> Generator[None, None, None]:
         yield
 
 
+def _get_chroma_persist_directory() -> Path:
+    persist_directory = settings.CHROMA_PERSIST_DIRECTORY
+    if not persist_directory.is_absolute():
+        persist_directory = BACKEND_DIR / persist_directory
+    return persist_directory.resolve()
+
+
+def _get_chroma_collection_names(client: Any) -> list[str]:
+    return sorted(
+        collection
+        if isinstance(collection, str)
+        else collection.name
+        for collection in client.list_collections()
+    )
+
+
 def _get_store() -> Any:
-    global _store
+    global _chroma_client, _store
     if _store is None:
         with _store_lock:
             if _store is None:
                 initialization_started = perf_counter()
                 try:
+                    import chromadb
                     from chromadb.config import Settings as ChromaSettings
                     from langchain_chroma import Chroma
 
-                    persist_directory = settings.CHROMA_PERSIST_DIRECTORY
-                    if not persist_directory.is_absolute():
-                        persist_directory = BACKEND_DIR / persist_directory
+                    persist_directory = _get_chroma_persist_directory()
                     persist_directory.mkdir(parents=True, exist_ok=True)
-                    _store = Chroma(
-                        collection_name=settings.CHROMA_COLLECTION_NAME,
-                        persist_directory=str(persist_directory),
-                        collection_metadata={"hnsw:space": "cosine"},
-                        client_settings=ChromaSettings(anonymized_telemetry=False),
+                    logger.info("Chroma persist directory: %s", persist_directory)
+                    logger.info(
+                        "Chroma collection name: %s",
+                        settings.CHROMA_COLLECTION_NAME,
                     )
+                    client = chromadb.PersistentClient(
+                        path=str(persist_directory),
+                        settings=ChromaSettings(anonymized_telemetry=False),
+                    )
+                    collection_name = settings.CHROMA_COLLECTION_NAME
+                    existing_names = set(_get_chroma_collection_names(client))
+                    if collection_name in existing_names:
+                        collection_exists = True
+                        client.get_collection(name=collection_name)
+                        logger.info(
+                            "Loaded existing Chroma collection: %s",
+                            collection_name,
+                        )
+                    else:
+                        collection_exists = False
+                        indexed_documents = [
+                            document
+                            for document in list_documents()
+                            if document.ingestion_status == "Indexed"
+                        ]
+                        if existing_names or indexed_documents:
+                            logger.error(
+                                "Collection missing: persist_directory=%s "
+                                "collection_name=%s total_collections=%d "
+                                "existing_collections=%s indexed_documents=%d "
+                                "vector_count=0 retriever_ready=FALSE",
+                                persist_directory,
+                                collection_name,
+                                len(existing_names),
+                                sorted(existing_names),
+                                len(indexed_documents),
+                            )
+                            _chroma_client = client
+                            raise ChromaCollectionMissingError(
+                                "The configured Chroma collection is missing "
+                                "while persisted index metadata exists."
+                            )
+                        logger.warning(
+                            "Collection missing: %s; creating the initial "
+                            "collection in %s",
+                            collection_name,
+                            persist_directory,
+                        )
+                    _store = Chroma(
+                        client=client,
+                        collection_name=collection_name,
+                        collection_metadata={"hnsw:space": "cosine"},
+                        create_collection_if_not_exists=not collection_exists,
+                    )
+                    _chroma_client = client
+                    logger.info("Chroma persist directory: %s", persist_directory)
                     logger.info(
                         "Chroma initialization time: %.3f seconds",
                         perf_counter() - initialization_started,
                     )
+                except VectorStoreError:
+                    raise
                 except Exception as exc:
                     logger.exception("Could not initialize the Chroma collection")
                     logger.info(
@@ -267,6 +339,153 @@ def _get_store() -> Any:
                         f"The vector database is unavailable: {exc}"
                     ) from exc
     return _store
+
+
+def get_chroma_diagnostics() -> dict[str, Any]:
+    try:
+        try:
+            store = _get_store()
+        except ChromaCollectionMissingError:
+            client = _chroma_client
+            if client is None:
+                raise
+            collection_names = _get_chroma_collection_names(client)
+            indexed_documents = [
+                document
+                for document in list_documents()
+                if document.ingestion_status == "Indexed"
+            ]
+            return {
+                "persist_directory": str(_get_chroma_persist_directory()),
+                "collection_name": settings.CHROMA_COLLECTION_NAME,
+                "total_collections": len(collection_names),
+                "collection_names": collection_names,
+                "vector_count": 0,
+                "document_count": 0,
+                "embedding_model": settings.EMBEDDING_MODEL,
+                "indexed_metadata_document_count": len(indexed_documents),
+                "missing_vector_document_count": len(indexed_documents),
+                "mismatched_chunk_document_count": len(indexed_documents),
+                "retriever_status": False,
+            }
+
+        client = _chroma_client
+        if client is None:
+            raise VectorStoreError("The persistent Chroma client is unavailable.")
+
+        collection = store._collection
+        collection_names = _get_chroma_collection_names(client)
+        vector_count = collection.count()
+        stored_records = collection.get(include=["metadatas"])
+        stored_document_ids = {
+            metadata["document_id"]
+            for metadata in stored_records["metadatas"] or []
+            if metadata and metadata.get("document_id")
+        }
+        vector_counts_by_document: dict[str, int] = {}
+        for metadata in stored_records["metadatas"] or []:
+            if metadata and metadata.get("document_id"):
+                document_id = metadata["document_id"]
+                vector_counts_by_document[document_id] = (
+                    vector_counts_by_document.get(document_id, 0) + 1
+                )
+
+        indexed_documents = [
+            document
+            for document in list_documents()
+            if document.ingestion_status == "Indexed"
+        ]
+        indexed_document_ids = {document.id for document in indexed_documents}
+        missing_vector_documents = indexed_document_ids - stored_document_ids
+        mismatched_chunk_documents = {
+            document.id
+            for document in indexed_documents
+            if vector_counts_by_document.get(document.id, 0)
+            != document.indexed_chunks
+        }
+
+        retriever_status = False
+        try:
+            if vector_count:
+                sample = collection.get(limit=1, include=["embeddings"])
+                sample_embeddings = sample["embeddings"]
+                if sample_embeddings is None or len(sample_embeddings) == 0:
+                    raise ValueError("Chroma returned no embedding for a stored vector.")
+                probe_embedding = sample_embeddings[0]
+                if hasattr(probe_embedding, "tolist"):
+                    probe_embedding = probe_embedding.tolist()
+                probe = collection.query(
+                    query_embeddings=[probe_embedding],
+                    n_results=1,
+                    include=["metadatas"],
+                )
+                retriever_status = bool(probe["ids"] and probe["ids"][0])
+            else:
+                client.heartbeat()
+                collection.get(limit=1, include=["metadatas"])
+                retriever_status = True
+        except Exception:
+            logger.exception("Chroma retriever integrity probe failed")
+
+        diagnostics = {
+            "persist_directory": str(
+                _get_chroma_persist_directory()
+            ),
+            "collection_name": settings.CHROMA_COLLECTION_NAME,
+            "total_collections": len(collection_names),
+            "collection_names": collection_names,
+            "vector_count": vector_count,
+            "document_count": len(stored_document_ids),
+            "embedding_model": settings.EMBEDDING_MODEL,
+            "indexed_metadata_document_count": len(indexed_document_ids),
+            "missing_vector_document_count": len(missing_vector_documents),
+            "mismatched_chunk_document_count": len(mismatched_chunk_documents),
+            "retriever_status": retriever_status,
+        }
+        return diagnostics
+    except VectorStoreError:
+        raise
+    except Exception as exc:
+        logger.exception("Could not verify Chroma persistence integrity")
+        raise VectorStoreError(
+            "Chroma persistence integrity could not be verified."
+        ) from exc
+
+
+def initialize_vector_store() -> dict[str, Any]:
+    diagnostics = get_chroma_diagnostics()
+    logger.info("Chroma persist directory: %s", diagnostics["persist_directory"])
+    logger.info("Chroma collection name: %s", diagnostics["collection_name"])
+    logger.info("Chroma total collections: %d", diagnostics["total_collections"])
+    logger.info("Chroma collections: %s", diagnostics["collection_names"])
+    logger.info("Chroma total vectors: %d", diagnostics["vector_count"])
+    logger.info("Chroma indexed documents: %d", diagnostics["document_count"])
+    logger.info("RAG embedding model: %s", diagnostics["embedding_model"])
+    logger.info(
+        "Indexed metadata documents: %d",
+        diagnostics["indexed_metadata_document_count"],
+    )
+    logger.info(
+        "Chroma retriever ready: %s",
+        "TRUE" if diagnostics["retriever_status"] else "FALSE",
+    )
+
+    if not diagnostics["retriever_status"]:
+        raise VectorStoreError("The Chroma retriever integrity probe failed.")
+    if (
+        diagnostics["missing_vector_document_count"]
+        or diagnostics["mismatched_chunk_document_count"]
+    ):
+        logger.error(
+            "Chroma index does not match document metadata: "
+            "missing_vector_documents=%d mismatched_chunk_documents=%d",
+            diagnostics["missing_vector_document_count"],
+            diagnostics["mismatched_chunk_document_count"],
+        )
+        raise VectorStoreError(
+            "The persisted Chroma index does not match indexed document metadata."
+        )
+    return diagnostics
 
 
 def initialize_embedding_service() -> None:
@@ -340,7 +559,6 @@ def _run_background_embedding_warmup(delay_seconds: float) -> None:
         _finish_background_embedding_warmup(success=False)
         return
 
-    logger.info("Warmup completed")
     _finish_background_embedding_warmup(success=True)
 
 
@@ -351,7 +569,7 @@ def _finish_background_embedding_warmup(*, success: bool) -> None:
                 "warming": False,
                 "embedding_model_loaded": is_embedding_model_loaded(),
                 "warmup_completed_at": datetime.now(timezone.utc).isoformat(),
-                "warmup_status": "ready" if success else "failed",
+                "warmup_status": "completed" if success else "failed",
                 "warmup_error": (
                     None if success else "Embedding model warm-up failed."
                 ),
@@ -359,6 +577,9 @@ def _finish_background_embedding_warmup(*, success: bool) -> None:
         )
         pending_ingestions = list(_pending_ingestions.items())
         _pending_ingestions.clear()
+
+    if success:
+        logger.info("Embedding Warmup Completed")
 
     for document_id, force in pending_ingestions:
         process_document_ingestion(document_id, force=force)

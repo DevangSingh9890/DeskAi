@@ -15,8 +15,11 @@ from app.routes.rag import router as rag_router
 from app.routes.tickets import router as tickets_router
 from app.services.file_service import ensure_uploads_dir
 from app.services.rag_service import (
+    initialize_vector_store,
     is_embedding_model_loaded,
     recover_interrupted_ingestions,
+    start_background_embedding_warmup,
+    VectorStoreError,
 )
 
 logging.basicConfig(
@@ -31,6 +34,10 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
     initialize_database()
     ensure_uploads_dir()
     recover_interrupted_ingestions()
+    try:
+        initialize_vector_store()
+    except VectorStoreError as exc:
+        logger.error("RAG persistence verification failed at startup: %s", exc)
 
     api_key = settings.GROQ_API_KEY
     print("GROQ_API_KEY loaded:", "YES" if api_key else "NO")
@@ -42,9 +49,10 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
             "GROQ_API_KEY is missing or empty; checked environment and %s",
             ENV_FILE,
         )
-    logger.info("Backend started")
+    logger.info("Backend Started")
+    start_background_embedding_warmup()
+    logger.info("Embedding Warmup Started")
     logger.info("Backend startup complete")
-    logger.info("Embedding model not loaded yet")
     yield
 
 

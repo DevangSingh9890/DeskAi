@@ -27,6 +27,7 @@ from app.services.groq_service import (
 )
 from app.services.rag_service import (
     VectorStoreError,
+    get_chroma_diagnostics,
     get_embedding_warmup_status,
     is_embedding_model_loaded,
     search_knowledge,
@@ -74,6 +75,18 @@ def debug_performance() -> dict[str, bool | int | str | None]:
             document.ingestion_status == "Indexed" for document in documents
         ),
     }
+
+
+@router.get("/debug/chroma")
+def debug_chroma() -> dict[str, object]:
+    try:
+        return get_chroma_diagnostics()
+    except VectorStoreError as exc:
+        logger.exception("Could not read Chroma diagnostics")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Chroma persistence diagnostics are unavailable.",
+        ) from exc
 
 
 @router.post("/admin/warmup")

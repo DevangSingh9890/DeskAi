@@ -41,7 +41,7 @@ export function KnowledgeBasePage({ performanceStatus }: KnowledgeBasePageProps)
       document.ingestion_status === 'Processing' &&
       !(
         document.processing_stage === 'queued' &&
-        performanceStatus?.warmup_status !== 'ready'
+        performanceStatus?.warmup_status !== 'completed'
       ),
   )
   const processingDocumentIds = documents

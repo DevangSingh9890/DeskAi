@@ -1,5 +1,8 @@
 from concurrent.futures import ThreadPoolExecutor
+import json
 import os
+import subprocess
+import sys
 import tempfile
 from threading import Event
 from time import perf_counter
@@ -291,7 +294,14 @@ class RagRouteTests(unittest.TestCase):
         self.store_patch.stop()
         try:
             with tempfile.TemporaryDirectory() as persistence_directory:
-                with patch.object(rag_service, "_store", None):
+                client = MagicMock()
+                client.list_collections.return_value = [
+                    SimpleNamespace(name="telemetry_test")
+                ]
+                with (
+                    patch.object(rag_service, "_store", None),
+                    patch.object(rag_service, "_chroma_client", None),
+                ):
                     with patch.object(
                         rag_service,
                         "settings",
@@ -300,21 +310,205 @@ class RagRouteTests(unittest.TestCase):
                             CHROMA_COLLECTION_NAME="telemetry_test",
                         ),
                     ):
-                        with patch(
-                            "langchain_chroma.Chroma"
-                        ) as chroma_constructor:
+                        with (
+                            patch(
+                                "chromadb.PersistentClient",
+                                return_value=client,
+                            ) as persistent_client_constructor,
+                            patch("langchain_chroma.Chroma") as chroma_constructor,
+                        ):
                             rag_service._get_store()
         finally:
             self.store_patch.start()
 
-        client_settings = chroma_constructor.call_args.kwargs["client_settings"]
+        client_settings = persistent_client_constructor.call_args.kwargs["settings"]
         self.assertEqual(
-            chroma_constructor.call_args.kwargs["persist_directory"],
-            persistence_directory,
+            persistent_client_constructor.call_args.kwargs["path"],
+            str(Path(persistence_directory).resolve()),
         )
         self.assertIsInstance(client_settings, ChromaSettings)
         self.assertFalse(client_settings.anonymized_telemetry)
-        self.store_patch.start()
+        client.get_collection.assert_called_once_with(name="telemetry_test")
+        self.assertIs(chroma_constructor.call_args.kwargs["client"], client)
+        self.assertFalse(
+            chroma_constructor.call_args.kwargs["create_collection_if_not_exists"]
+        )
+
+    def test_missing_collection_is_not_recreated_for_indexed_documents(self) -> None:
+        self.store_patch.stop()
+        try:
+            client = MagicMock()
+            client.list_collections.return_value = []
+            with (
+                patch.object(rag_service, "_store", None),
+                patch.object(rag_service, "_chroma_client", None),
+                patch.object(
+                    rag_service,
+                    "settings",
+                    SimpleNamespace(
+                        CHROMA_PERSIST_DIRECTORY=Path(self.temporary_directory.name)
+                        / "chroma",
+                        CHROMA_COLLECTION_NAME="missing_collection",
+                        EMBEDDING_MODEL="sentence-transformers/all-MiniLM-L6-v2",
+                    ),
+                ),
+                patch(
+                    "chromadb.PersistentClient",
+                    return_value=client,
+                ),
+                patch(
+                    "app.services.rag_service.list_documents",
+                    return_value=[
+                        SimpleNamespace(ingestion_status="Indexed")
+                    ],
+                ),
+                patch("langchain_chroma.Chroma") as chroma_constructor,
+            ):
+                with self.assertRaises(VectorStoreError):
+                    rag_service._get_store()
+
+            chroma_constructor.assert_not_called()
+        finally:
+            self.store_patch.start()
+
+    def test_missing_collection_diagnostics_report_index_mismatch(self) -> None:
+        client = MagicMock()
+        client.list_collections.return_value = [SimpleNamespace(name="other_collection")]
+        indexed_document = SimpleNamespace(
+            id="persisted-document",
+            ingestion_status="Indexed",
+            indexed_chunks=3,
+        )
+        with (
+            patch.object(
+                rag_service,
+                "_get_store",
+                side_effect=rag_service.ChromaCollectionMissingError(
+                    "configured collection missing"
+                ),
+            ),
+            patch.object(rag_service, "_chroma_client", client),
+            patch.object(
+                rag_service,
+                "settings",
+                SimpleNamespace(
+                    CHROMA_PERSIST_DIRECTORY=Path(self.temporary_directory.name)
+                    / "chroma",
+                    CHROMA_COLLECTION_NAME="missing_collection",
+                    EMBEDDING_MODEL="sentence-transformers/all-MiniLM-L6-v2",
+                ),
+            ),
+            patch(
+                "app.services.rag_service.list_documents",
+                return_value=[indexed_document],
+            ),
+        ):
+            diagnostics = rag_service.get_chroma_diagnostics()
+
+        self.assertEqual(diagnostics["collection_names"], ["other_collection"])
+        self.assertEqual(diagnostics["vector_count"], 0)
+        self.assertEqual(diagnostics["indexed_metadata_document_count"], 1)
+        self.assertEqual(diagnostics["missing_vector_document_count"], 1)
+        self.assertFalse(diagnostics["retriever_status"])
+
+    def test_persistent_vectors_are_retrievable_in_a_new_process(self) -> None:
+        self.store_patch.stop()
+        try:
+            with tempfile.TemporaryDirectory() as persistence_directory:
+                collection_name = "restart_test"
+                persistence_path = Path(persistence_directory) / "chroma"
+                settings = SimpleNamespace(
+                    CHROMA_PERSIST_DIRECTORY=persistence_path,
+                    CHROMA_COLLECTION_NAME=collection_name,
+                    RAG_RELEVANCE_THRESHOLD=0.35,
+                    EMBEDDING_MODEL="sentence-transformers/all-MiniLM-L6-v2",
+                )
+                with (
+                    patch.object(rag_service, "settings", settings),
+                    patch.object(rag_service, "_store", None),
+                    patch.object(rag_service, "_chroma_client", None),
+                ):
+                    try:
+                        upload = self.client.post(
+                            "/api/documents/upload",
+                            files={
+                                "file": (
+                                    "vpn.txt",
+                                    ("VPN authentication fails. " * 70).encode(),
+                                    "text/plain",
+                                )
+                            },
+                        )
+                        self.assertEqual(upload.status_code, 201)
+                        document_id = upload.json()["document_id"]
+                        indexed_document = self.client.get(
+                            f"/api/documents/{document_id}/status"
+                        ).json()
+                        self.assertEqual(indexed_document["status"], "completed")
+                        document_embedding_calls = (
+                            self.embedding.embed_documents.call_count
+                        )
+
+                        diagnostics = rag_service.initialize_vector_store()
+                        self.assertTrue(diagnostics["retriever_status"])
+                        self.assertEqual(diagnostics["document_count"], 1)
+                        self.assertEqual(
+                            diagnostics["missing_vector_document_count"], 0
+                        )
+                        self.assertEqual(
+                            diagnostics["mismatched_chunk_document_count"], 0
+                        )
+
+                        child_environment = os.environ.copy()
+                        child_environment["CHROMA_PERSIST_DIRECTORY"] = str(
+                            persistence_path
+                        )
+                        child_environment["CHROMA_COLLECTION_NAME"] = collection_name
+                        child_script = """
+import json
+from app.services.rag_service import _get_store
+
+store = _get_store()
+matches = store.similarity_search_by_vector_with_relevance_scores(
+    embedding=[0.1] * 384,
+    k=4,
+)
+print(json.dumps([
+    {"content": document.page_content, "metadata": document.metadata}
+    for document, _ in matches
+]))
+"""
+                        restarted_process = subprocess.run(
+                            [sys.executable, "-c", child_script],
+                            cwd=Path(__file__).resolve().parents[1],
+                            env=child_environment,
+                            check=True,
+                            capture_output=True,
+                            text=True,
+                        )
+                        results = json.loads(
+                            restarted_process.stdout.strip().splitlines()[-1]
+                        )
+
+                        self.assertTrue(results)
+                        self.assertTrue(
+                            all(
+                                result["metadata"]["document_id"] == document_id
+                                for result in results
+                            )
+                        )
+                        self.assertEqual(
+                            self.embedding.embed_documents.call_count,
+                            document_embedding_calls,
+                        )
+                    finally:
+                        client = rag_service._chroma_client
+                        if client is not None:
+                            client._system.stop()
+                        rag_service._store = None
+                        rag_service._chroma_client = None
+        finally:
+            self.store_patch.start()
 
     def test_embedding_model_is_initialized_once(self) -> None:
         with (
@@ -471,13 +665,13 @@ class RagRouteTests(unittest.TestCase):
             status = rag_service.get_embedding_warmup_status()
             self.assertFalse(status["warming"])
             self.assertTrue(status["embedding_model_loaded"])
-            self.assertEqual(status["warmup_status"], "ready")
+            self.assertEqual(status["warmup_status"], "completed")
             self.assertIsNotNone(status["warmup_started_at"])
             self.assertIsNotNone(status["warmup_completed_at"])
             output = "\n".join(logs.output)
             self.assertIn("Background embedding warmup started", output)
             self.assertIn("Embedding model loaded successfully", output)
-            self.assertIn("Warmup completed", output)
+            self.assertIn("Embedding Warmup Completed", output)
 
     def test_ingestion_is_deferred_and_drained_after_warmup(self) -> None:
         state = {
@@ -501,7 +695,7 @@ class RagRouteTests(unittest.TestCase):
 
         process.assert_called_once_with("deferred-doc", force=True)
         self.assertFalse(state["warming"])
-        self.assertEqual(state["warmup_status"], "ready")
+        self.assertEqual(state["warmup_status"], "completed")
 
     def test_model_cache_settings_are_supported(self) -> None:
         with tempfile.TemporaryDirectory() as cache_root:

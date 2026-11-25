@@ -12,7 +12,7 @@ export interface PerformanceStatus {
   model: string
   warmup_started_at: string | null
   warmup_completed_at: string | null
-  warmup_status: 'not_started' | 'warming' | 'ready' | 'failed'
+  warmup_status: 'not_started' | 'warming' | 'completed' | 'failed'
   warmup_error: string | null
 }
 
