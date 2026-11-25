@@ -12,8 +12,6 @@ interface SidebarKnowledgeBaseProps {
   deletingId: string | null
   onUpload: (file: File) => Promise<boolean>
   onDelete: (documentId: string) => void
-  onClose?: () => void
-  mobile?: boolean
 }
 
 export function SidebarKnowledgeBase({
@@ -26,11 +24,9 @@ export function SidebarKnowledgeBase({
   deletingId,
   onUpload,
   onDelete,
-  onClose,
-  mobile = false,
 }: SidebarKnowledgeBaseProps) {
   return (
-    <aside className={`knowledge-sidebar ${mobile ? 'knowledge-sidebar--drawer' : ''}`}>
+    <aside className="knowledge-sidebar">
       <div className="sidebar-title-row">
         <div className="sidebar-title-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24">
@@ -39,21 +35,9 @@ export function SidebarKnowledgeBase({
           </svg>
         </div>
         <div>
-          <p className="sidebar-eyebrow">KNOWLEDGE BASE</p>
-          <h2>Support library</h2>
+          <p className="sidebar-eyebrow">DOCUMENT MANAGEMENT</p>
+          <h2>Manage knowledge documents</h2>
         </div>
-        {mobile && (
-          <button
-            className="drawer-close-button"
-            type="button"
-            onClick={onClose}
-            aria-label="Close knowledge base"
-          >
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-              <path d="m5 5 10 10M15 5 5 15" />
-            </svg>
-          </button>
-        )}
       </div>
 
       <UploadPanel

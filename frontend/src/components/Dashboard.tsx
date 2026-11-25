@@ -1,20 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ChatContainer } from './ChatContainer'
 import { ChatInput } from './ChatInput'
-import { SidebarKnowledgeBase } from './SidebarKnowledgeBase'
 import { TicketsDashboard } from '../pages/TicketsDashboard'
-import {
-  deleteDocument,
-  getDocumentErrorMessage,
-  getDocuments,
-  getDocumentStatus,
-  uploadDocument,
-} from '../services/documentService'
-import type {
-  DocumentJobStatus,
-  DocumentSummary,
-  IngestionStatus,
-} from '../services/documentService'
 import {
   getChatErrorMessage,
   getPerformanceStatus,
@@ -44,13 +31,6 @@ const greeting: ChatMessage = {
   role: 'assistant',
   content: "Hello, I'm your AI Service Desk Assistant. How can I help you today?",
   timestamp: new Date(),
-}
-
-const ingestionStatusByJobStatus: Record<DocumentJobStatus, IngestionStatus> = {
-  uploaded: 'Uploaded',
-  processing: 'Processing',
-  completed: 'Indexed',
-  failed: 'Failed',
 }
 
 function isTicketPriority(value: string | null | undefined): value is TicketPriority {
@@ -147,17 +127,8 @@ export function Dashboard() {
   const [draft, setDraft] = useState('')
   const [isChatLoading, setIsChatLoading] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
-  const [documents, setDocuments] = useState<DocumentSummary[]>([])
   const [performanceStatus, setPerformanceStatus] =
     useState<PerformanceStatus | null>(null)
-  const [isDocumentsLoading, setIsDocumentsLoading] = useState(true)
-  const [isUploading, setIsUploading] = useState(false)
-  const [uploadingFilename, setUploadingFilename] = useState<string | null>(null)
-  const [uploadProgress, setUploadProgress] = useState(0)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [documentError, setDocumentError] = useState<string | null>(null)
-  const [documentNotice, setDocumentNotice] = useState<string | null>(null)
-  const [sidebarOpen, setSidebarOpen] = useState(false)
   useEffect(() => {
     let active = true
     let timeoutId: number | undefined
@@ -208,55 +179,6 @@ export function Dashboard() {
       if (timeoutId !== undefined) window.clearTimeout(timeoutId)
     }
   }, [])
-  const isIndexing = documents.some(
-    (document) =>
-      document.ingestion_status === 'Processing' &&
-      !(
-        document.processing_stage === 'queued' &&
-        performanceStatus?.warmup_status !== 'ready'
-      ),
-  )
-  const processingDocumentIds = documents
-    .filter((document) => document.ingestion_status === 'Processing')
-    .map((document) => document.id)
-    .sort()
-    .join(',')
-  const indexingDocument = documents.find(
-    (document) => document.ingestion_status === 'Processing',
-  )
-  const activeDocumentFilename = isUploading
-    ? uploadingFilename
-    : indexingDocument?.filename ?? null
-
-  const refreshDocuments = useCallback(async () => {
-    const result = await getDocuments()
-    setDocuments(result)
-    setDocumentError(null)
-  }, [])
-
-  useEffect(() => {
-    let active = true
-
-    void Promise.resolve()
-      .then(getDocuments)
-      .then((result) => {
-        if (active) {
-          setDocuments(result)
-          setDocumentError(null)
-        }
-      })
-      .catch((error: unknown) => {
-        if (active) setDocumentError(getDocumentErrorMessage(error))
-      })
-      .finally(() => {
-        if (active) setIsDocumentsLoading(false)
-      })
-
-    return () => {
-      active = false
-    }
-  }, [])
-
   useEffect(() => {
     let active = true
     let timeoutId: number | undefined
@@ -288,57 +210,6 @@ export function Dashboard() {
       if (timeoutId !== undefined) window.clearTimeout(timeoutId)
     }
   }, [])
-
-  useEffect(() => {
-    if (!processingDocumentIds) return
-
-    const documentIds = processingDocumentIds.split(',')
-    let active = true
-    let timeoutId: number | undefined
-
-    async function pollDocumentStatuses() {
-      try {
-        const statuses = await Promise.all(
-          documentIds.map(async (documentId) => [
-            documentId,
-            await getDocumentStatus(documentId),
-          ] as const),
-        )
-        if (!active) return
-
-        const statusesById = new Map(statuses)
-        setDocuments((currentDocuments) =>
-          currentDocuments.map((document) => {
-            const job = statusesById.get(document.id)
-            if (!job) return document
-            return {
-              ...document,
-              ingestion_status: ingestionStatusByJobStatus[job.status],
-              processing_stage: job.stage,
-              processing_error: job.error,
-            }
-          }),
-        )
-      } catch (error: unknown) {
-        if (active) setDocumentError(getDocumentErrorMessage(error))
-      } finally {
-        if (active) {
-          timeoutId = window.setTimeout(() => {
-            void pollDocumentStatuses()
-          }, 1500)
-        }
-      }
-    }
-
-    timeoutId = window.setTimeout(() => {
-      void pollDocumentStatuses()
-    }, 1000)
-
-    return () => {
-      active = false
-      if (timeoutId !== undefined) window.clearTimeout(timeoutId)
-    }
-  }, [processingDocumentIds])
 
   async function handleSend() {
     const message = draft.trim()
@@ -651,92 +522,6 @@ export function Dashboard() {
     }
   }
 
-  async function handleUpload(file: File): Promise<boolean> {
-    if (isUploading || isIndexing) return false
-
-    const extension = file.name.split('.').pop()?.toLowerCase()
-    if (!extension || !['pdf', 'docx', 'txt'].includes(extension)) {
-      setDocumentError('Only PDF, DOCX, and TXT files are supported.')
-      return false
-    }
-
-    setDocumentError(null)
-    setDocumentNotice(null)
-    setUploadingFilename(file.name)
-    setUploadProgress(0)
-    setIsUploading(true)
-    try {
-      const uploaded = await uploadDocument(file, setUploadProgress)
-      if (uploaded.status === 'warming') {
-        setDocumentNotice(
-          uploaded.message ??
-            'Embedding model is still warming up. Please wait.',
-        )
-        try {
-          await refreshDocuments()
-        } catch (error: unknown) {
-          setDocumentError(
-            `The uploaded document status could not be refreshed: ${getDocumentErrorMessage(error)}`,
-          )
-        }
-        return true
-      }
-
-      setDocuments((currentDocuments) => [
-        {
-          id: uploaded.document_id,
-          filename: file.name,
-          size: file.size,
-          uploaded_at: new Date().toISOString(),
-          ingestion_status: ingestionStatusByJobStatus[uploaded.status],
-          indexed_chunks: 0,
-          processing_stage: uploaded.stage,
-          processing_error: uploaded.error,
-        },
-        ...currentDocuments.filter(
-          (document) => document.id !== uploaded.document_id,
-        ),
-      ])
-      try {
-        await refreshDocuments()
-      } catch (error: unknown) {
-        setDocumentError(
-          `The uploaded document status could not be refreshed: ${getDocumentErrorMessage(error)}`,
-        )
-      }
-      if (uploaded.status === 'failed') {
-        const stage = uploaded.stage ? ` at ${uploaded.stage}` : ''
-        setDocumentError(
-          `Indexing failed${stage}: ${uploaded.error ?? 'Check backend logs.'}`,
-        )
-      }
-      return true
-    } catch (error: unknown) {
-      setDocumentError(getDocumentErrorMessage(error))
-      return false
-    } finally {
-      setIsUploading(false)
-      setUploadingFilename(null)
-    }
-  }
-
-  async function handleDelete(documentId: string) {
-    if (deletingId) return
-
-    setDocumentError(null)
-    setDeletingId(documentId)
-    try {
-      await deleteDocument(documentId)
-      setDocuments((currentDocuments) =>
-        currentDocuments.filter((document) => document.id !== documentId),
-      )
-    } catch (error: unknown) {
-      setDocumentError(getDocumentErrorMessage(error))
-    } finally {
-      setDeletingId(null)
-    }
-  }
-
   return (
     <div className="dashboard-shell">
       <header className="dashboard-header">
@@ -750,8 +535,8 @@ export function Dashboard() {
           <div className="dashboard-brand-copy">
             <h1>AI Service Desk Assistant</h1>
             <p>
-              Upload support documentation, ask questions, and manage incidents
-              from a single workspace.
+              Get AI-powered support, resolve issues, and manage service desk
+              operations.
             </p>
           </div>
         </div>
@@ -796,61 +581,11 @@ export function Dashboard() {
                   ? '🟢 RAG Engine Ready'
                   : 'RAG Engine Checking'}
           </span>
-          {activeView === 'chat' && (
-            <button
-              className="sidebar-toggle"
-              type="button"
-              onClick={() => setSidebarOpen((open) => !open)}
-              aria-expanded={sidebarOpen}
-              aria-label={sidebarOpen ? 'Collapse knowledge base panel' : 'Open knowledge base panel'}
-            >
-              <svg viewBox="0 0 20 20" aria-hidden="true">
-                <path d="M3 4.5h14v11H3zM8 4.5v11" />
-              </svg>
-              <span>Knowledge base</span>
-            </button>
-          )}
         </div>
       </header>
 
-      {documentError && (
-        <div className="dashboard-alert" role="alert">
-          <span>{documentError}</span>
-          <button type="button" onClick={() => setDocumentError(null)} aria-label="Dismiss error">
-            ×
-          </button>
-        </div>
-      )}
-      {documentNotice && (
-        <div className="dashboard-notice" role="status" aria-live="polite">
-          {documentNotice}
-        </div>
-      )}
-
       {activeView === 'chat' ? (
-        <div
-          className={`dashboard-workspace ${sidebarOpen ? 'dashboard-workspace--sidebar-open' : 'dashboard-workspace--sidebar-collapsed'}`}
-        >
-          <SidebarKnowledgeBase
-            mobile
-            documents={documents}
-            isLoading={isDocumentsLoading}
-            isUploading={isUploading}
-            isIndexing={isIndexing}
-            uploadProgress={uploadProgress}
-            uploadingFilename={activeDocumentFilename}
-            deletingId={deletingId}
-            onUpload={handleUpload}
-            onDelete={handleDelete}
-            onClose={() => setSidebarOpen(false)}
-          />
-          <button
-            className={`mobile-drawer-backdrop ${sidebarOpen ? 'mobile-drawer-backdrop--visible' : ''}`}
-            type="button"
-            onClick={() => setSidebarOpen(false)}
-            aria-label="Close knowledge base panel"
-            tabIndex={sidebarOpen ? 0 : -1}
-          />
+        <div className="dashboard-workspace dashboard-workspace--chat-only">
           <main className="chat-workspace">
             <ChatContainer
               messages={messages}
@@ -870,26 +605,24 @@ export function Dashboard() {
             <ChatInput
               value={draft}
               isLoading={isChatLoading}
-              isUploading={isUploading}
-              isIndexing={isIndexing}
-              uploadProgress={uploadProgress}
-              uploadingFilename={activeDocumentFilename}
               onChange={setDraft}
               onSubmit={handleSend}
-              onAttach={(file) => void handleUpload(file)}
             />
             <p className="composer-privacy">
               <svg viewBox="0 0 16 16" aria-hidden="true">
                 <rect x="3.5" y="7" width="9" height="7" rx="1.5" />
                 <path d="M5.5 7V5a2 2 0 0 1 4 0v2" />
               </svg>
-              Your conversation and documents stay within your workspace.
+              Your conversation stays within your workspace.
             </p>
           </main>
         </div>
       ) : (
         <main className="ticket-page-shell">
-          <TicketsDashboard refreshKey={ticketsRefreshKey} />
+          <TicketsDashboard
+            refreshKey={ticketsRefreshKey}
+            performanceStatus={performanceStatus}
+          />
         </main>
       )}
       {handoffConversationId && (

@@ -16,9 +16,12 @@ import type {
   TicketStatus,
 } from '../types/ticket'
 import { HumanSupportQueue } from '../components/HumanSupportQueue'
+import { KnowledgeBasePage } from './KnowledgeBasePage'
+import type { PerformanceStatus } from '../services/api'
 
 interface TicketsDashboardProps {
   refreshKey: number
+  performanceStatus: PerformanceStatus | null
 }
 
 const ticketStatuses: Array<'All' | TicketStatus> = [
@@ -47,7 +50,10 @@ const assignmentGroups = [
 ]
 const pageSize = 10
 
-export function TicketsDashboard({ refreshKey }: TicketsDashboardProps) {
+export function TicketsDashboard({
+  refreshKey,
+  performanceStatus,
+}: TicketsDashboardProps) {
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [summary, setSummary] = useState<AdminDashboardSummary | null>(null)
   const [total, setTotal] = useState(0)
@@ -62,7 +68,9 @@ export function TicketsDashboard({ refreshKey }: TicketsDashboardProps) {
   const [sortOrder, setSortOrder] = useState<AdminTicketFilters['sortOrder']>('desc')
   const [page, setPage] = useState(1)
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null)
-  const [activeSection, setActiveSection] = useState<'tickets' | 'analytics' | 'human-support'>('tickets')
+  const [activeSection, setActiveSection] = useState<
+    'tickets' | 'analytics' | 'human-support' | 'knowledge-base'
+  >('tickets')
   const [localRefreshKey, setLocalRefreshKey] = useState(0)
 
   useEffect(() => {
@@ -157,7 +165,7 @@ export function TicketsDashboard({ refreshKey }: TicketsDashboardProps) {
         </span>
       </header>
 
-      <nav className="ticket-section-tabs" aria-label="Ticket center sections">
+      <nav className="ticket-section-tabs" aria-label="Admin portal sections">
         <button
           className={activeSection === 'tickets' ? 'ticket-section-tab ticket-section-tab--active' : 'ticket-section-tab'}
           type="button"
@@ -181,6 +189,14 @@ export function TicketsDashboard({ refreshKey }: TicketsDashboardProps) {
           onClick={() => setActiveSection('human-support')}
         >
           Human Support
+        </button>
+        <button
+          className={activeSection === 'knowledge-base' ? 'ticket-section-tab ticket-section-tab--active' : 'ticket-section-tab'}
+          type="button"
+          aria-current={activeSection === 'knowledge-base' ? 'page' : undefined}
+          onClick={() => setActiveSection('knowledge-base')}
+        >
+          Knowledge Base
         </button>
       </nav>
 
@@ -312,8 +328,10 @@ export function TicketsDashboard({ refreshKey }: TicketsDashboardProps) {
         </>
       ) : activeSection === 'analytics' ? (
         <AnalyticsDashboard refreshKey={refreshKey + localRefreshKey} />
-      ) : (
+      ) : activeSection === 'human-support' ? (
         <HumanSupportQueue />
+      ) : (
+        <KnowledgeBasePage performanceStatus={performanceStatus} />
       )}
 
       {selectedTicket && (
