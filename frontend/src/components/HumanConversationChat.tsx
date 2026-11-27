@@ -276,7 +276,7 @@ export function HumanConversationChat({
               <div className="human-admin-message__byline">
                 <strong>
                   {role === 'ai'
-                    ? 'AI Assistant'
+                    ? 'DeskAI Assistant'
                     : role === 'agent'
                       ? conversation?.assigned_agent ?? 'Support Engineer'
                       : role === 'system'
@@ -324,12 +324,12 @@ export function HumanConversationChat({
       </div>
       <aside
         className={`human-conversation-context${showMobileContext ? ' human-conversation-context--mobile-open' : ''}`}
-        aria-label="Ticket details and AI context"
+        aria-label="Case details and insights"
       >
         <header className="human-conversation-context__header">
           <div>
             <p className="ticket-eyebrow">CASE OVERVIEW</p>
-            <h4>Ticket details</h4>
+            <h4>Current case</h4>
           </div>
           {conversation && (
             <span className={`human-status-label human-status-label--${conversation.status.toLowerCase().replace(' ', '-')}`}>
@@ -338,7 +338,7 @@ export function HumanConversationChat({
           )}
         </header>
         <section className="human-context-group">
-          <h5>Ticket &amp; transfer</h5>
+          <h5>Case &amp; transfer</h5>
           <dl>
             <div><dt>SR Number</dt><dd>{displayId}</dd></div>
             <div><dt>Ticket ID</dt><dd>{conversation?.ticket_id ?? 'No linked ticket'}</dd></div>
@@ -351,23 +351,23 @@ export function HumanConversationChat({
           </dl>
         </section>
         <section className="human-context-group">
-          <h5>AI context</h5>
+          <h5>Case insights</h5>
           <dl>
             <div>
-              <dt>AI summary</dt>
+              <dt>Summary</dt>
               <dd>
                 {formatContextValue(conversation?.context.summary, 'No summary available')}
               </dd>
             </div>
-            <div><dt>AI classification</dt><dd>{formatContextValue(classification, 'Not available')}</dd></div>
-            <div><dt>Knowledge sources</dt><dd>{Array.isArray(knowledgeSources) && knowledgeSources.length ? knowledgeSources.join(', ') : 'None retrieved'}</dd></div>
-            <div><dt>Knowledge results</dt><dd>
+            <div><dt>Classification</dt><dd>{formatContextValue(classification, 'Not available')}</dd></div>
+            <div><dt>Knowledge references</dt><dd>{Array.isArray(knowledgeSources) && knowledgeSources.length ? knowledgeSources.join(', ') : 'None retrieved'}</dd></div>
+            <div><dt>Search results</dt><dd>
               {Array.isArray(conversation?.context.knowledge_results)
                 ? `${conversation.context.knowledge_results.length} retrieved result(s)`
                 : 'No retrieved results'}
             </dd></div>
-            <div><dt>Troubleshooting summary</dt><dd>{formatContextValue(troubleshooting, 'No troubleshooting summary')}</dd></div>
-            <div><dt>Ticket information</dt><dd>{formatContextValue(ticketData, 'No ticket data')}</dd></div>
+            <div><dt>Troubleshooting</dt><dd>{formatContextValue(troubleshooting, 'No troubleshooting summary')}</dd></div>
+            <div><dt>Case status</dt><dd>{formatContextValue(ticketData, 'No ticket data')}</dd></div>
           </dl>
         </section>
         {conversation && Boolean(conversation.context.conversation_history) && (

@@ -1,11 +1,14 @@
+import { useEffect, useState } from 'react'
+import type { AppRoute } from '../types/navigation'
+
 interface LandingPageProps {
-  onNavigate: (destination: '/' | '/login' | '/dashboard') => void
+  onNavigate: (destination: AppRoute) => void
 }
 
 const features = [
   {
     icon: '✦',
-    title: 'AI Support Assistant',
+    title: 'DeskAI Assistant',
     description: 'Resolve everyday IT questions through a helpful, natural conversation.',
     tone: 'violet',
   },
@@ -68,6 +71,23 @@ function BrandMark() {
 }
 
 export function LandingPage({ onNavigate }: LandingPageProps) {
+  const [isRoleSelectionOpen, setIsRoleSelectionOpen] = useState(false)
+
+  useEffect(() => {
+    if (!isRoleSelectionOpen) return
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setIsRoleSelectionOpen(false)
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isRoleSelectionOpen])
+
+  function openRoleSelection() {
+    setIsRoleSelectionOpen(true)
+  }
+
   return (
     <div className="landing-page">
       <header className="landing-nav">
@@ -91,7 +111,7 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
           <button type="button" className="landing-login-link" onClick={() => onNavigate('/login')}>
             Login
           </button>
-          <button type="button" className="button button--primary button--nav" onClick={() => onNavigate('/dashboard')}>
+          <button type="button" className="button button--primary button--nav" onClick={openRoleSelection}>
             Get started <span aria-hidden="true">↗</span>
           </button>
         </div>
@@ -109,7 +129,7 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
               troubleshooting, ticket automation, and human escalation.
             </p>
             <div className="landing-hero-actions">
-              <button type="button" className="button button--primary" onClick={() => onNavigate('/dashboard')}>
+              <button type="button" className="button button--primary" onClick={openRoleSelection}>
                 Get started <span aria-hidden="true">→</span>
               </button>
               <button type="button" className="button button--glass" onClick={() => onNavigate('/login')}>
@@ -139,7 +159,7 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
                 <div className="hero-ai-message">
                   <div className="hero-ai-avatar"><BrandMark /></div>
                   <div>
-                    <strong>DeskAI Assistant <span>AI support</span></strong>
+                    <strong>DeskAI Assistant <span>AI assistant</span></strong>
                     <p>Let’s get you connected. First, check that your network is active, then reopen the VPN client.</p>
                     <div className="hero-source-chip"><span>▤</span> Remote access guide <b>·</b> 3 steps</div>
                   </div>
@@ -208,7 +228,7 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
             <p className="section-eyebrow section-eyebrow--light">BUILT FOR BETTER SERVICE</p>
             <h2>Give your people<br />their time back.</h2>
             <p>Less searching. Less friction. More meaningful support for everyone.</p>
-            <button type="button" className="button button--light" onClick={() => onNavigate('/dashboard')}>
+            <button type="button" className="button button--light" onClick={openRoleSelection}>
               Explore DeskAI <span aria-hidden="true">→</span>
             </button>
           </div>
@@ -231,6 +251,62 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
         <p>Agentic AI Service Desk</p>
         <span>© {new Date().getFullYear()} DeskAI. Support, made thoughtful.</span>
       </footer>
+
+      {isRoleSelectionOpen && (
+        <div
+          className="role-selection-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setIsRoleSelectionOpen(false)
+          }}
+        >
+          <section
+            className="role-selection-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="role-selection-title"
+            aria-describedby="role-selection-description"
+          >
+            <button
+              className="role-selection-close"
+              type="button"
+              aria-label="Close role selection"
+              onClick={() => setIsRoleSelectionOpen(false)}
+            >
+              ×
+            </button>
+            <span className="role-selection-mark"><BrandMark /></span>
+            <p className="section-eyebrow">WELCOME TO DESKAI</p>
+            <h2 id="role-selection-title">Welcome to DeskAI</h2>
+            <p id="role-selection-description">Choose how you would like to continue.</p>
+            <div className="role-selection-options">
+              <button
+                className="role-selection-card role-selection-card--assistant"
+                type="button"
+                onClick={() => onNavigate('/assistant')}
+              >
+                <span className="role-selection-card-icon" aria-hidden="true">✦</span>
+                <span className="role-selection-card-copy">
+                  <strong>Talk to AI Assistant</strong>
+                  <span>Get instant support, troubleshooting assistance, knowledge search, and ticket creation.</span>
+                </span>
+                <span className="role-selection-card-action">Start Chatting <span aria-hidden="true">→</span></span>
+              </button>
+              <button
+                className="role-selection-card role-selection-card--admin"
+                type="button"
+                onClick={() => onNavigate('/admin')}
+              >
+                <span className="role-selection-card-icon" aria-hidden="true">▤</span>
+                <span className="role-selection-card-copy">
+                  <strong>Admin Portal</strong>
+                  <span>Manage tickets, knowledge base, analytics, and human support operations.</span>
+                </span>
+                <span className="role-selection-card-action">Open Admin Portal <span aria-hidden="true">→</span></span>
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   )
 }

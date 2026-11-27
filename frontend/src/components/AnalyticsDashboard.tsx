@@ -32,6 +32,16 @@ export function AnalyticsDashboard({ refreshKey }: AnalyticsDashboardProps) {
   const [error, setError] = useState<string | null>(null)
   const [metricsError, setMetricsError] = useState<string | null>(null)
 
+  const activeCases = analytics?.status_distribution
+    .filter(({ name }) => ['open', 'in progress'].includes(name.toLowerCase()))
+    .reduce((total, { count }) => total + count, 0)
+  const completedCases = analytics?.status_distribution
+    .filter(({ name }) => ['resolved', 'closed'].includes(name.toLowerCase()))
+    .reduce((total, { count }) => total + count, 0)
+  const resolutionRate = analytics?.total_tickets
+    ? `${Math.round(((completedCases ?? 0) / analytics.total_tickets) * 100)}%`
+    : '—'
+
   useEffect(() => {
     let active = true
     void getAdminAnalytics()
@@ -94,8 +104,8 @@ export function AnalyticsDashboard({ refreshKey }: AnalyticsDashboardProps) {
         <>
           <div className="analytics-summary-grid" aria-label="Service desk analytics">
             <article><span>Total tickets</span><strong>{analytics.total_tickets}</strong><small>All recorded tickets</small></article>
-            <article><span>Open tickets</span><strong>{analytics.open_tickets}</strong><small>Awaiting resolution</small></article>
-            <article><span>Closed tickets</span><strong>{analytics.status_distribution.find((item) => item.name.toLowerCase() === 'closed')?.count ?? '—'}</strong><small>Closed by the service desk</small></article>
+            <article><span>Active cases</span><strong>{activeCases ?? '—'}</strong><small>Open or in progress</small></article>
+            <article><span>Resolution rate</span><strong>{resolutionRate}</strong><small>Resolved or closed</small></article>
             <article><span>High priority</span><strong>{analytics.high_priority_tickets}</strong><small>Needs attention</small></article>
             <article><span>Human escalations</span><strong>{humanEscalationCount ?? '—'}</strong><small>Support conversations</small></article>
             <article><span>Knowledge documents</span><strong>{summary?.knowledge_documents ?? '—'}</strong><small>Available to DeskAI</small></article>

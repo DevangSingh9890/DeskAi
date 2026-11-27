@@ -19,7 +19,7 @@ interface AnalyticsChartsProps {
   analytics: TicketAnalytics
 }
 
-const chartColors = ['#6572d8', '#42a883', '#e3a34f', '#df6f73', '#8870bd', '#53a7bd', '#8492a7']
+const chartColors = ['#6d5be0', '#38a47c', '#dfa64d', '#d96e79', '#8a75db', '#4e9aad', '#7f8aa2']
 
 function ChartPanel({
   title,
@@ -51,7 +51,7 @@ export function AnalyticsCharts({ analytics }: AnalyticsChartsProps) {
             <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#858da0' }} axisLine={false} tickLine={false} />
             <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: '#858da0' }} axisLine={false} tickLine={false} />
             <Tooltip />
-            <Bar dataKey="count" name="Tickets" fill="#6572d8" radius={[5, 5, 0, 0]} />
+            <Bar dataKey="count" name="Tickets" fill="#6d5be0" radius={[7, 7, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </ChartPanel>
@@ -111,7 +111,7 @@ export function AnalyticsCharts({ analytics }: AnalyticsChartsProps) {
             />
             <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: '#858da0' }} axisLine={false} tickLine={false} />
             <Tooltip />
-            <Bar dataKey="count" name="Tickets" fill="#42a883" radius={[5, 5, 0, 0]} />
+            <Bar dataKey="count" name="Tickets" fill="#38a47c" radius={[7, 7, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </ChartPanel>
@@ -134,7 +134,7 @@ export function AnalyticsCharts({ analytics }: AnalyticsChartsProps) {
               tickLine={false}
             />
             <Tooltip />
-            <Bar dataKey="count" name="Tickets" fill="#8870bd" radius={[0, 5, 5, 0]} />
+            <Bar dataKey="count" name="Tickets" fill="#8a75db" radius={[0, 7, 7, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </ChartPanel>

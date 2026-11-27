@@ -1,5 +1,7 @@
+import type { AppRoute } from '../types/navigation'
+
 interface LoginPageProps {
-  onNavigate: (destination: '/' | '/login' | '/dashboard') => void
+  onNavigate: (destination: AppRoute) => void
 }
 
 function BrandMark() {
@@ -44,13 +46,13 @@ export function LoginPage({ onNavigate }: LoginPageProps) {
           <p className="login-card-copy">Authentication is not enabled in this demo. Continue to explore the application.</p>
           <label className="login-label" htmlFor="demo-email">Work email</label>
           <input id="demo-email" className="login-input" type="email" placeholder="you@company.com" autoComplete="email" />
-          <button type="button" className="button button--primary login-submit" onClick={() => onNavigate('/dashboard')}>
+          <button type="button" className="button button--primary login-submit" onClick={() => onNavigate('/assistant')}>
             Continue to DeskAI <span aria-hidden="true">→</span>
           </button>
           <div className="login-demo-note"><span>✦</span> Demo access · No password required</div>
           <p className="login-terms">By continuing, you’re entering a product demo. No account or personal data is submitted.</p>
         </div>
-        <p className="login-form-footer">Need a hand? <button type="button" onClick={() => onNavigate('/dashboard')}>Explore the support workspace</button></p>
+        <p className="login-form-footer">Need a hand? <button type="button" onClick={() => onNavigate('/assistant')}>Explore the support workspace</button></p>
       </section>
     </main>
   )

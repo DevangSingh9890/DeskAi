@@ -1,13 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ChatContainer } from './ChatContainer'
 import { ChatInput } from './ChatInput'
-import { TicketsDashboard } from '../pages/TicketsDashboard'
 import {
   getChatErrorMessage,
-  getPerformanceStatus,
   sendAgentChatMessage,
 } from '../services/api'
-import type { PerformanceStatus } from '../services/api'
 import type { AgentRefinementContext, ChatMessage } from '../types/chat'
 import type { TicketCreateRequest, TicketPriority } from '../types/ticket'
 import {
@@ -25,12 +22,13 @@ import type { CreateHandoffRequest } from '../types/handoff'
 import { HumanChatWidget } from './HumanChatWidget'
 import { HumanSupportPopup } from './HumanSupportPopup'
 import { formatServiceRequestId } from '../utils/handoff'
+import type { AppRoute } from '../types/navigation'
 import '../human-support.css'
 
 const greeting: ChatMessage = {
   id: 'welcome',
   role: 'assistant',
-  content: "Hello, I'm your AI Service Desk Assistant. How can I help you today?",
+  content: "Hello, I'm your DeskAI Assistant. How can I help you today?",
   timestamp: new Date(),
 }
 
@@ -115,7 +113,7 @@ function buildRefinementContext(
 }
 
 interface DashboardProps {
-  onNavigate: (destination: '/' | '/login' | '/dashboard') => void
+  onNavigate: (destination: AppRoute) => void
 }
 
 interface LocalConversation {
@@ -125,14 +123,12 @@ interface LocalConversation {
 }
 
 export function Dashboard({ onNavigate }: DashboardProps) {
-  const [activeView, setActiveView] = useState<'chat' | 'tickets'>('chat')
   const [handoffConversationId, setHandoffConversationId] = useState<string | null>(null)
   const [handoffDisplayId, setHandoffDisplayId] = useState<string | null>(null)
   const [handoffRestored, setHandoffRestored] = useState(false)
   const [showHandoffPopup, setShowHandoffPopup] = useState(false)
   const [isHandoffPending, setIsHandoffPending] = useState(false)
   const [handoffError, setHandoffError] = useState<string | null>(null)
-  const [ticketsRefreshKey, setTicketsRefreshKey] = useState(0)
   const [messages, setMessages] = useState<ChatMessage[]>([greeting])
   const [activeConversationId, setActiveConversationId] = useState('conversation-initial')
   const [conversations, setConversations] = useState<LocalConversation[]>([
@@ -147,8 +143,6 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   const [draft, setDraft] = useState('')
   const [isChatLoading, setIsChatLoading] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
-  const [performanceStatus, setPerformanceStatus] =
-    useState<PerformanceStatus | null>(null)
 
   useEffect(() => {
     const firstQuestion = messages.find((message) => message.role === 'user')?.content
@@ -217,38 +211,6 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       if (timeoutId !== undefined) window.clearTimeout(timeoutId)
     }
   }, [])
-  useEffect(() => {
-    let active = true
-    let timeoutId: number | undefined
-
-    async function pollPerformanceStatus() {
-      try {
-        const status = await getPerformanceStatus()
-        if (!active) return
-        setPerformanceStatus(status)
-        if (status.warming || status.warmup_status === 'not_started') {
-          timeoutId = window.setTimeout(
-            () => void pollPerformanceStatus(),
-            1000,
-          )
-        }
-      } catch {
-        if (active) {
-          timeoutId = window.setTimeout(
-            () => void pollPerformanceStatus(),
-            3000,
-          )
-        }
-      }
-    }
-
-    void pollPerformanceStatus()
-    return () => {
-      active = false
-      if (timeoutId !== undefined) window.clearTimeout(timeoutId)
-    }
-  }, [])
-
   async function handleSend() {
     const message = draft.trim()
     if (!message || isChatLoading) return
@@ -378,7 +340,6 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           )
           return
         }
-        setTicketsRefreshKey((currentKey) => currentKey + 1)
         setMessages((currentMessages) =>
           currentMessages.map((message) =>
             message.id === sourceMessage.id
@@ -541,9 +502,6 @@ export function Dashboard({ onNavigate }: DashboardProps) {
             : candidate,
         ),
       )
-      if (result.ticket) {
-        setTicketsRefreshKey((currentKey) => currentKey + 1)
-      }
     } catch (error: unknown) {
       setMessages((currentMessages) =>
         currentMessages.map((candidate) =>
@@ -574,7 +532,6 @@ export function Dashboard({ onNavigate }: DashboardProps) {
     setChatError(null)
     setAwaitingClarification(false)
     setDissatisfactionCount(0)
-    setActiveView('chat')
   }
 
   function openConversation(conversation: LocalConversation) {
@@ -583,22 +540,8 @@ export function Dashboard({ onNavigate }: DashboardProps) {
     setDraft('')
     setChatError(null)
     setAwaitingClarification(false)
-    setActiveView('chat')
   }
 
-  const latestAgentMessage = [...messages]
-    .reverse()
-    .find((message) => message.role === 'assistant' && message.agentResponse)
-  const latestResponse = latestAgentMessage?.agentResponse
-  const latestClassification = latestResponse?.classification
-  const latestTicketMessage = [...messages]
-    .reverse()
-    .find((message) => message.createdTicket || message.agentResponse?.ticket_status)
-  const latestTicket = latestTicketMessage?.createdTicket
-  const ticketStatus =
-    latestTicket?.status ??
-    latestTicketMessage?.agentResponse?.ticket_status?.status ??
-    null
   const recentConversations = conversations
     .filter(
       (conversation) =>
@@ -610,7 +553,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   return (
     <div className="dashboard-shell dashboard-shell--app">
       <header className="dashboard-header">
-        <button className="dashboard-brand" type="button" onClick={() => onNavigate('/')}>
+        <button className="dashboard-brand" type="button" onClick={() => onNavigate('/assistant')}>
           <span className="brand-mark" aria-hidden="true">
             <svg viewBox="0 0 32 32">
               <path d="M16 3.5 19.1 12l8.4 4-8.4 3.1L16 28.5 12.9 19l-8.4-3 8.4-4L16 3.5Z" />
@@ -618,36 +561,11 @@ export function Dashboard({ onNavigate }: DashboardProps) {
             </svg>
           </span>
           <div className="dashboard-brand-copy">
-            <h1>DeskAI</h1>
-            <p>Agentic AI Service Desk</p>
+            <h1>DeskAI Assistant</h1>
+            <p>Personal support workspace</p>
           </div>
         </button>
         <div className="dashboard-header-actions">
-          <span
-            className={`header-status ${
-              performanceStatus?.warming
-                ? 'header-status--warming'
-                : performanceStatus?.warmup_status === 'failed'
-                  ? 'header-status--failed'
-                  : performanceStatus?.embedding_model_loaded
-                    ? 'header-status--ready'
-                    : 'header-status--checking'
-            }`}
-            role="status"
-            aria-live="polite"
-          >
-            <span className="status-dot" aria-hidden="true" />
-            {performanceStatus?.warming
-              ? 'AI engine warming up'
-              : performanceStatus?.warmup_status === 'failed'
-                ? 'AI engine unavailable'
-                : performanceStatus?.embedding_model_loaded
-                  ? 'AI engine ready'
-                  : 'Connecting to AI'}
-          </span>
-          <button className="dashboard-home-link" type="button" onClick={() => onNavigate('/')}>
-            <span aria-hidden="true">⌂</span> Home
-          </button>
           <div className="workspace-avatar" aria-label="Demo workspace">D</div>
         </div>
       </header>
@@ -658,28 +576,6 @@ export function Dashboard({ onNavigate }: DashboardProps) {
             <span aria-hidden="true">＋</span> New chat
             <kbd>⌘ K</kbd>
           </button>
-          <p className="app-sidebar-label">WORKSPACE</p>
-          <nav className="app-primary-nav" aria-label="Workspace navigation">
-            <button
-              className={activeView === 'chat' ? 'app-nav-item app-nav-item--active' : 'app-nav-item'}
-              type="button"
-              aria-current={activeView === 'chat' ? 'page' : undefined}
-              onClick={() => setActiveView('chat')}
-            >
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 4.5h13v9h-7l-4 3v-3h-2z" /><path d="M6.5 8h7M6.5 10.5h4" /></svg>
-              AI Support
-              <span className="nav-item-badge">AI</span>
-            </button>
-            <button
-              className={activeView === 'tickets' ? 'app-nav-item app-nav-item--active' : 'app-nav-item'}
-              type="button"
-              aria-current={activeView === 'tickets' ? 'page' : undefined}
-              onClick={() => setActiveView('tickets')}
-            >
-              <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3.5" y="3.5" width="13" height="13" rx="2" /><path d="M7 7h6M7 10h6M7 13h3" /></svg>
-              Admin Portal
-            </button>
-          </nav>
 
           <div className="app-sidebar-section">
             <div className="app-sidebar-section-heading">
@@ -705,10 +601,10 @@ export function Dashboard({ onNavigate }: DashboardProps) {
 
           <div className="app-sidebar-section app-quick-actions">
             <p className="app-sidebar-label">QUICK ACTIONS</p>
-            <button type="button" onClick={() => { setActiveView('chat'); setDraft('I need help connecting to the VPN.') }}>
+            <button type="button" onClick={() => setDraft('I need help connecting to the VPN.')}>
               <span aria-hidden="true">⌁</span> Troubleshoot an issue
             </button>
-            <button type="button" onClick={() => { setActiveView('chat'); setDraft('I have a question about my account.') }}>
+            <button type="button" onClick={() => setDraft('I have a question about my account.')}>
               <span aria-hidden="true">✦</span> Ask DeskAI
             </button>
           </div>
@@ -720,9 +616,8 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           </div>
         </aside>
 
-        {activeView === 'chat' ? (
-          <div className="dashboard-workspace dashboard-workspace--chat-only">
-            <main className="chat-workspace">
+        <div className="dashboard-workspace dashboard-workspace--chat-only">
+          <main className="chat-workspace">
               <ChatContainer
                 messages={messages}
                 isLoading={isChatLoading}
@@ -751,59 +646,8 @@ export function Dashboard({ onNavigate }: DashboardProps) {
                 </svg>
                 DeskAI can make mistakes. Check important information.
               </p>
-            </main>
-
-            <aside className="assistant-context-panel" aria-label="Conversation context">
-              <div className="context-panel-heading">
-                <div><span className="context-panel-kicker">LIVE CONTEXT</span><h2>Issue overview</h2></div>
-                <span className="context-live-dot" title="Conversation context" />
-              </div>
-              <section className="context-card">
-                <div className="context-card-heading"><span className="context-card-icon">◈</span><h3>Classification</h3></div>
-                <dl>
-                  <div><dt>Category</dt><dd>{latestClassification?.category ?? 'Not classified yet'}</dd></div>
-                  {latestClassification?.subcategory && <div><dt>Type</dt><dd>{latestClassification.subcategory}</dd></div>}
-                  {latestClassification?.assigned_group && <div><dt>Assigned group</dt><dd>{latestClassification.assigned_group}</dd></div>}
-                </dl>
-                <div className="context-priority-row"><span>Priority</span><strong className={`context-priority context-priority--${(latestClassification?.priority ?? 'unset').toLowerCase()}`}>{latestClassification?.priority ?? '—'}</strong></div>
-              </section>
-              <section className="context-card">
-                <div className="context-card-heading"><span className="context-card-icon context-card-icon--blue">▤</span><h3>Knowledge sources</h3><span className="context-count">{latestResponse?.knowledge_sources?.length ?? 0}</span></div>
-                {latestResponse?.knowledge_sources?.length ? (
-                  <ul className="context-source-list">
-                    {latestResponse.knowledge_sources.slice(0, 4).map((source, index) => (
-                      <li key={`${source}-${index}`}><span>PDF</span><strong>{source}</strong></li>
-                    ))}
-                  </ul>
-                ) : <p className="context-empty">Sources will appear here when DeskAI finds relevant guidance.</p>}
-              </section>
-              <section className="context-card">
-                <div className="context-card-heading"><span className="context-card-icon context-card-icon--green">▣</span><h3>Ticket information</h3></div>
-                {latestTicket ? (
-                  <div className="context-ticket">
-                    <span>{latestTicket.ticket_number ?? latestTicket.ticket_id}</span>
-                    <strong>{latestTicket.title}</strong>
-                    <small>{latestTicket.assigned_group}</small>
-                  </div>
-                ) : latestTicketMessage?.agentResponse?.ticket_status ? (
-                  <div className="context-ticket">
-                    <span>{latestTicketMessage.agentResponse.ticket_status.ticket_id}</span>
-                    <strong>{latestTicketMessage.agentResponse.ticket_status.assigned_group ?? 'Service desk'}</strong>
-                  </div>
-                ) : <p className="context-empty">A ticket will appear here if one is created.</p>}
-                <div className="context-status-row"><span>Status</span><strong className={ticketStatus ? 'context-status context-status--active' : 'context-status'}><i />{ticketStatus ?? 'No ticket'}</strong></div>
-              </section>
-              <div className="context-assurance"><span>✦</span><p><strong>AI + human support</strong><br />Escalate to a person whenever you need.</p></div>
-            </aside>
-          </div>
-        ) : (
-          <main className="ticket-page-shell">
-            <TicketsDashboard
-              refreshKey={ticketsRefreshKey}
-              performanceStatus={performanceStatus}
-            />
           </main>
-        )}
+        </div>
       </div>
 
       {handoffConversationId && (

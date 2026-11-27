@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Dashboard } from './components/Dashboard'
+import { AdminWorkspace } from './pages/AdminWorkspace'
 import { LandingPage } from './pages/LandingPage'
 import { LoginPage } from './pages/LoginPage'
+import type { AppRoute } from './types/navigation'
 import './App.css'
 
 function App() {
@@ -16,7 +18,7 @@ function App() {
     return () => window.removeEventListener('popstate', syncPath)
   }, [])
 
-  const navigate = useCallback((destination: '/' | '/login' | '/dashboard') => {
+  const navigate = useCallback((destination: AppRoute) => {
     if (window.location.pathname !== destination) {
       window.history.pushState(null, '', destination)
     }
@@ -30,7 +32,13 @@ function App() {
   if (path === '/login') {
     return <LoginPage onNavigate={navigate} />
   }
-  return <Dashboard onNavigate={navigate} />
+  if (path === '/admin') {
+    return <AdminWorkspace />
+  }
+  if (path === '/assistant' || path === '/dashboard') {
+    return <Dashboard onNavigate={navigate} />
+  }
+  return <LandingPage onNavigate={navigate} />
 }
 
 export default App

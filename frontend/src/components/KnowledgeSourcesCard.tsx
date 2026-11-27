@@ -9,9 +9,9 @@ export function KnowledgeSourcesCard({ sources }: KnowledgeSourcesCardProps) {
   return (
     <details className="agent-data-card" open>
       <summary className="agent-data-card-summary">
-        <span className="agent-data-card-title">Knowledge Sources</span>
+        <span className="agent-data-card-title">Knowledge References</span>
         <span className="agent-source-count">
-          {uniqueSources.length} {uniqueSources.length === 1 ? 'source' : 'sources'}
+          {uniqueSources.length} {uniqueSources.length === 1 ? 'reference' : 'references'}
         </span>
         <span className="agent-card-chevron" aria-hidden="true" />
       </summary>

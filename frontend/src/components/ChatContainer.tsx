@@ -67,10 +67,15 @@ export function ChatContainer({
   const messageListRef = useRef<HTMLDivElement>(null)
   const shouldAutoScrollRef = useRef(true)
   const latestMessageId = messages[messages.length - 1]?.id
+  const previousScrollStateRef = useRef({ latestMessageId, isLoading })
 
   useEffect(() => {
     const messageList = messageListRef.current
-    if (shouldAutoScrollRef.current && messageList) {
+    const shouldScrollForUpdate =
+      previousScrollStateRef.current.latestMessageId !== latestMessageId ||
+      previousScrollStateRef.current.isLoading !== isLoading
+    previousScrollStateRef.current = { latestMessageId, isLoading }
+    if (shouldScrollForUpdate && shouldAutoScrollRef.current && messageList) {
       messageList.scrollTo({ top: messageList.scrollHeight, behavior: 'smooth' })
     }
   }, [latestMessageId, isLoading])
@@ -93,7 +98,7 @@ export function ChatContainer({
             </svg>
           </span>
           <div>
-            <h2>AI Service Desk Assistant</h2>
+            <h2>DeskAI Assistant</h2>
             <p><span className="status-dot" /> Ready to help</p>
           </div>
         </div>

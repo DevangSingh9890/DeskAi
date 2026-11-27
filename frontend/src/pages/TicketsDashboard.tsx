@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 
-import { AnalyticsDashboard } from '../components/AnalyticsDashboard'
 import { TicketDetailsDrawer } from '../components/TicketDetailsDrawer'
 import { TicketsTable } from '../components/TicketsTable'
 import {
@@ -15,13 +14,9 @@ import type {
   TicketPriority,
   TicketStatus,
 } from '../types/ticket'
-import { HumanSupportQueue } from '../components/HumanSupportQueue'
-import { KnowledgeBasePage } from './KnowledgeBasePage'
-import type { PerformanceStatus } from '../services/api'
 
 interface TicketsDashboardProps {
   refreshKey: number
-  performanceStatus: PerformanceStatus | null
 }
 
 const ticketStatuses: Array<'All' | TicketStatus> = [
@@ -52,7 +47,6 @@ const pageSize = 10
 
 export function TicketsDashboard({
   refreshKey,
-  performanceStatus,
 }: TicketsDashboardProps) {
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [summary, setSummary] = useState<AdminDashboardSummary | null>(null)
@@ -68,9 +62,6 @@ export function TicketsDashboard({
   const [sortOrder, setSortOrder] = useState<AdminTicketFilters['sortOrder']>('desc')
   const [page, setPage] = useState(1)
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null)
-  const [activeSection, setActiveSection] = useState<
-    'tickets' | 'analytics' | 'human-support' | 'knowledge-base'
-  >('tickets')
   const [localRefreshKey, setLocalRefreshKey] = useState(0)
 
   useEffect(() => {
@@ -165,48 +156,7 @@ export function TicketsDashboard({
         </span>
       </header>
 
-      <nav className="ticket-section-tabs" aria-label="Admin portal sections">
-        <button
-          className={activeSection === 'tickets' ? 'ticket-section-tab ticket-section-tab--active' : 'ticket-section-tab'}
-          type="button"
-          aria-current={activeSection === 'tickets' ? 'page' : undefined}
-          onClick={() => setActiveSection('tickets')}
-        >
-          <span className="admin-section-icon" aria-hidden="true">▤</span>
-          Ticket Center
-        </button>
-        <button
-          className={activeSection === 'analytics' ? 'ticket-section-tab ticket-section-tab--active' : 'ticket-section-tab'}
-          type="button"
-          aria-current={activeSection === 'analytics' ? 'page' : undefined}
-          onClick={() => setActiveSection('analytics')}
-        >
-          <span className="admin-section-icon" aria-hidden="true">⌁</span>
-          Admin Analytics
-        </button>
-        <button
-          className={activeSection === 'human-support' ? 'ticket-section-tab ticket-section-tab--active' : 'ticket-section-tab'}
-          type="button"
-          aria-current={activeSection === 'human-support' ? 'page' : undefined}
-          onClick={() => setActiveSection('human-support')}
-        >
-          <span className="admin-section-icon" aria-hidden="true">◎</span>
-          Human Support
-        </button>
-        <button
-          className={activeSection === 'knowledge-base' ? 'ticket-section-tab ticket-section-tab--active' : 'ticket-section-tab'}
-          type="button"
-          aria-current={activeSection === 'knowledge-base' ? 'page' : undefined}
-          onClick={() => setActiveSection('knowledge-base')}
-        >
-          <span className="admin-section-icon" aria-hidden="true">▧</span>
-          Knowledge Base
-        </button>
-      </nav>
-
-      <div className="admin-section-content">
-      {activeSection === 'tickets' ? (
-        <>
+      <div className="ticket-center-content">
           <div className="ticket-metric-grid" aria-label="Ticket metrics">
             <article className="ticket-metric-card">
               <span>All Tickets</span><strong>{summary?.total_tickets ?? '—'}</strong>
@@ -219,9 +169,6 @@ export function TicketsDashboard({
             </article>
             <article className="ticket-metric-card ticket-metric-card--priority">
               <span>High Priority</span><strong>{summary?.high_priority_tickets ?? '—'}</strong>
-            </article>
-            <article className="ticket-metric-card ticket-metric-card--documents">
-              <span>Knowledge Documents</span><strong>{summary?.knowledge_documents ?? '—'}</strong>
             </article>
           </div>
 
@@ -330,14 +277,6 @@ export function TicketsDashboard({
               </>
             )}
           </section>
-        </>
-      ) : activeSection === 'analytics' ? (
-        <AnalyticsDashboard refreshKey={refreshKey + localRefreshKey} />
-      ) : activeSection === 'human-support' ? (
-        <HumanSupportQueue />
-      ) : (
-        <KnowledgeBasePage performanceStatus={performanceStatus} />
-      )}
       </div>
 
       {selectedTicket && (
