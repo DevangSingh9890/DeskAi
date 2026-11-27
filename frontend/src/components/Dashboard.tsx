@@ -24,6 +24,7 @@ import {
 import type { CreateHandoffRequest } from '../types/handoff'
 import { HumanChatWidget } from './HumanChatWidget'
 import { HumanSupportPopup } from './HumanSupportPopup'
+import { formatServiceRequestId } from '../utils/handoff'
 import '../human-support.css'
 
 const greeting: ChatMessage = {
@@ -113,15 +114,34 @@ function buildRefinementContext(
   }
 }
 
-export function Dashboard() {
+interface DashboardProps {
+  onNavigate: (destination: '/' | '/login' | '/dashboard') => void
+}
+
+interface LocalConversation {
+  id: string
+  title: string
+  messages: ChatMessage[]
+}
+
+export function Dashboard({ onNavigate }: DashboardProps) {
   const [activeView, setActiveView] = useState<'chat' | 'tickets'>('chat')
   const [handoffConversationId, setHandoffConversationId] = useState<string | null>(null)
+  const [handoffDisplayId, setHandoffDisplayId] = useState<string | null>(null)
   const [handoffRestored, setHandoffRestored] = useState(false)
   const [showHandoffPopup, setShowHandoffPopup] = useState(false)
   const [isHandoffPending, setIsHandoffPending] = useState(false)
   const [handoffError, setHandoffError] = useState<string | null>(null)
   const [ticketsRefreshKey, setTicketsRefreshKey] = useState(0)
   const [messages, setMessages] = useState<ChatMessage[]>([greeting])
+  const [activeConversationId, setActiveConversationId] = useState('conversation-initial')
+  const [conversations, setConversations] = useState<LocalConversation[]>([
+    {
+      id: 'conversation-initial',
+      title: 'New conversation',
+      messages: [greeting],
+    },
+  ])
   const [dissatisfactionCount, setDissatisfactionCount] = useState(0)
   const [awaitingClarification, setAwaitingClarification] = useState(false)
   const [draft, setDraft] = useState('')
@@ -129,6 +149,23 @@ export function Dashboard() {
   const [chatError, setChatError] = useState<string | null>(null)
   const [performanceStatus, setPerformanceStatus] =
     useState<PerformanceStatus | null>(null)
+
+  useEffect(() => {
+    const firstQuestion = messages.find((message) => message.role === 'user')?.content
+    const title = firstQuestion
+      ? firstQuestion.length > 38
+        ? `${firstQuestion.slice(0, 38).trimEnd()}…`
+        : firstQuestion
+      : 'New conversation'
+    setConversations((current) =>
+      current.map((conversation) =>
+        conversation.id === activeConversationId
+          ? { ...conversation, title, messages }
+          : conversation,
+      ),
+    )
+  }, [activeConversationId, messages])
+
   useEffect(() => {
     let active = true
     let timeoutId: number | undefined
@@ -160,6 +197,7 @@ export function Dashboard() {
         }
         setHandoffRestored(true)
         setHandoffConversationId(savedConversationId)
+        setHandoffDisplayId(formatServiceRequestId(detail.conversation.id))
       } catch (error: unknown) {
         if (!active) return
         if (isHandoffNotFound(error)) {
@@ -413,6 +451,7 @@ export function Dashboard() {
         created.conversation_id,
       )
       setHandoffConversationId(created.conversation_id)
+      setHandoffDisplayId(formatServiceRequestId(created.id))
       setHandoffRestored(false)
       setShowHandoffPopup(true)
       setMessages((currentMessages) =>
@@ -451,6 +490,7 @@ export function Dashboard() {
     setHandoffConversationId((currentId) =>
       currentId === conversationId ? null : currentId,
     )
+    setHandoffDisplayId(null)
     setHandoffRestored(false)
     setShowHandoffPopup(false)
   }, [])
@@ -522,10 +562,55 @@ export function Dashboard() {
     }
   }
 
+  function startNewChat() {
+    const id = `conversation-${window.crypto.randomUUID()}`
+    setConversations((current) => [
+      { id, title: 'New conversation', messages: [greeting] },
+      ...current,
+    ])
+    setActiveConversationId(id)
+    setMessages([greeting])
+    setDraft('')
+    setChatError(null)
+    setAwaitingClarification(false)
+    setDissatisfactionCount(0)
+    setActiveView('chat')
+  }
+
+  function openConversation(conversation: LocalConversation) {
+    setActiveConversationId(conversation.id)
+    setMessages(conversation.messages)
+    setDraft('')
+    setChatError(null)
+    setAwaitingClarification(false)
+    setActiveView('chat')
+  }
+
+  const latestAgentMessage = [...messages]
+    .reverse()
+    .find((message) => message.role === 'assistant' && message.agentResponse)
+  const latestResponse = latestAgentMessage?.agentResponse
+  const latestClassification = latestResponse?.classification
+  const latestTicketMessage = [...messages]
+    .reverse()
+    .find((message) => message.createdTicket || message.agentResponse?.ticket_status)
+  const latestTicket = latestTicketMessage?.createdTicket
+  const ticketStatus =
+    latestTicket?.status ??
+    latestTicketMessage?.agentResponse?.ticket_status?.status ??
+    null
+  const recentConversations = conversations
+    .filter(
+      (conversation) =>
+        conversation.title !== 'New conversation' ||
+        conversation.id === activeConversationId,
+    )
+    .slice(0, 6)
+
   return (
-    <div className="dashboard-shell">
+    <div className="dashboard-shell dashboard-shell--app">
       <header className="dashboard-header">
-        <div className="dashboard-brand">
+        <button className="dashboard-brand" type="button" onClick={() => onNavigate('/')}>
           <span className="brand-mark" aria-hidden="true">
             <svg viewBox="0 0 32 32">
               <path d="M16 3.5 19.1 12l8.4 4-8.4 3.1L16 28.5 12.9 19l-8.4-3 8.4-4L16 3.5Z" />
@@ -533,32 +618,11 @@ export function Dashboard() {
             </svg>
           </span>
           <div className="dashboard-brand-copy">
-            <h1>AI Service Desk Assistant</h1>
-            <p>
-              Get AI-powered support, resolve issues, and manage service desk
-              operations.
-            </p>
+            <h1>DeskAI</h1>
+            <p>Agentic AI Service Desk</p>
           </div>
-        </div>
+        </button>
         <div className="dashboard-header-actions">
-          <nav className="dashboard-view-tabs" aria-label="Workspace sections">
-            <button
-              className={activeView === 'chat' ? 'dashboard-view-tab dashboard-view-tab--active' : 'dashboard-view-tab'}
-              type="button"
-              aria-current={activeView === 'chat' ? 'page' : undefined}
-              onClick={() => setActiveView('chat')}
-            >
-              AI Support Portal
-            </button>
-            <button
-              className={activeView === 'tickets' ? 'dashboard-view-tab dashboard-view-tab--active' : 'dashboard-view-tab'}
-              type="button"
-              aria-current={activeView === 'tickets' ? 'page' : undefined}
-              onClick={() => setActiveView('tickets')}
-            >
-              Admin Portal
-            </button>
-          </nav>
           <span
             className={`header-status ${
               performanceStatus?.warming
@@ -574,57 +638,174 @@ export function Dashboard() {
           >
             <span className="status-dot" aria-hidden="true" />
             {performanceStatus?.warming
-              ? '🟡 RAG Engine Warming Up'
+              ? 'AI engine warming up'
               : performanceStatus?.warmup_status === 'failed'
-                ? '🔴 RAG Engine Unavailable'
+                ? 'AI engine unavailable'
                 : performanceStatus?.embedding_model_loaded
-                  ? '🟢 RAG Engine Ready'
-                  : 'RAG Engine Checking'}
+                  ? 'AI engine ready'
+                  : 'Connecting to AI'}
           </span>
+          <button className="dashboard-home-link" type="button" onClick={() => onNavigate('/')}>
+            <span aria-hidden="true">⌂</span> Home
+          </button>
+          <div className="workspace-avatar" aria-label="Demo workspace">D</div>
         </div>
       </header>
 
-      {activeView === 'chat' ? (
-        <div className="dashboard-workspace dashboard-workspace--chat-only">
-          <main className="chat-workspace">
-            <ChatContainer
-              messages={messages}
-              isLoading={isChatLoading}
-              error={chatError}
-              onSelectSuggestion={setDraft}
-              onTicketDecision={(messageId, approved) =>
-                void handleTicketDecision(messageId, approved)
-              }
-              onAnswerFeedback={handleAnswerFeedback}
-              onHandoff={(messageId) => void handleHandoff(messageId)}
-              onContinueWithAI={handleContinueWithAI}
-              handoffPending={isHandoffPending}
-              handoffError={handoffError}
-              handoffExists={handoffConversationId !== null}
+      <div className="app-shell-layout">
+        <aside className="app-sidebar">
+          <button className="new-chat-button" type="button" onClick={startNewChat} disabled={isChatLoading}>
+            <span aria-hidden="true">＋</span> New chat
+            <kbd>⌘ K</kbd>
+          </button>
+          <p className="app-sidebar-label">WORKSPACE</p>
+          <nav className="app-primary-nav" aria-label="Workspace navigation">
+            <button
+              className={activeView === 'chat' ? 'app-nav-item app-nav-item--active' : 'app-nav-item'}
+              type="button"
+              aria-current={activeView === 'chat' ? 'page' : undefined}
+              onClick={() => setActiveView('chat')}
+            >
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 4.5h13v9h-7l-4 3v-3h-2z" /><path d="M6.5 8h7M6.5 10.5h4" /></svg>
+              AI Support
+              <span className="nav-item-badge">AI</span>
+            </button>
+            <button
+              className={activeView === 'tickets' ? 'app-nav-item app-nav-item--active' : 'app-nav-item'}
+              type="button"
+              aria-current={activeView === 'tickets' ? 'page' : undefined}
+              onClick={() => setActiveView('tickets')}
+            >
+              <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3.5" y="3.5" width="13" height="13" rx="2" /><path d="M7 7h6M7 10h6M7 13h3" /></svg>
+              Admin Portal
+            </button>
+          </nav>
+
+          <div className="app-sidebar-section">
+            <div className="app-sidebar-section-heading">
+              <p className="app-sidebar-label">RECENT CONVERSATIONS</p>
+              <span>{recentConversations.length}</span>
+            </div>
+            <div className="recent-conversation-list">
+              {recentConversations.map((conversation) => (
+                <button
+                  className={activeConversationId === conversation.id ? 'recent-conversation recent-conversation--active' : 'recent-conversation'}
+                  type="button"
+                  key={conversation.id}
+                  onClick={() => openConversation(conversation)}
+                  disabled={isChatLoading}
+                  title={conversation.title}
+                >
+                  <span className="recent-conversation-icon" aria-hidden="true">◌</span>
+                  <span>{conversation.title}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="app-sidebar-section app-quick-actions">
+            <p className="app-sidebar-label">QUICK ACTIONS</p>
+            <button type="button" onClick={() => { setActiveView('chat'); setDraft('I need help connecting to the VPN.') }}>
+              <span aria-hidden="true">⌁</span> Troubleshoot an issue
+            </button>
+            <button type="button" onClick={() => { setActiveView('chat'); setDraft('I have a question about my account.') }}>
+              <span aria-hidden="true">✦</span> Ask DeskAI
+            </button>
+          </div>
+
+          <div className="app-sidebar-footer">
+            <span className="workspace-avatar workspace-avatar--sidebar">D</span>
+            <div><strong>Demo workspace</strong><span>Service desk</span></div>
+            <span className="sidebar-footer-menu" aria-hidden="true">···</span>
+          </div>
+        </aside>
+
+        {activeView === 'chat' ? (
+          <div className="dashboard-workspace dashboard-workspace--chat-only">
+            <main className="chat-workspace">
+              <ChatContainer
+                messages={messages}
+                isLoading={isChatLoading}
+                error={chatError}
+                onSelectSuggestion={setDraft}
+                onTicketDecision={(messageId, approved) =>
+                  void handleTicketDecision(messageId, approved)
+                }
+                onAnswerFeedback={handleAnswerFeedback}
+                onHandoff={(messageId) => void handleHandoff(messageId)}
+                onContinueWithAI={handleContinueWithAI}
+                handoffPending={isHandoffPending}
+                handoffError={handoffError}
+                handoffExists={handoffConversationId !== null}
+              />
+              <ChatInput
+                value={draft}
+                isLoading={isChatLoading}
+                onChange={setDraft}
+                onSubmit={handleSend}
+              />
+              <p className="composer-privacy">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <rect x="3.5" y="7" width="9" height="7" rx="1.5" />
+                  <path d="M5.5 7V5a2 2 0 0 1 4 0v2" />
+                </svg>
+                DeskAI can make mistakes. Check important information.
+              </p>
+            </main>
+
+            <aside className="assistant-context-panel" aria-label="Conversation context">
+              <div className="context-panel-heading">
+                <div><span className="context-panel-kicker">LIVE CONTEXT</span><h2>Issue overview</h2></div>
+                <span className="context-live-dot" title="Conversation context" />
+              </div>
+              <section className="context-card">
+                <div className="context-card-heading"><span className="context-card-icon">◈</span><h3>Classification</h3></div>
+                <dl>
+                  <div><dt>Category</dt><dd>{latestClassification?.category ?? 'Not classified yet'}</dd></div>
+                  {latestClassification?.subcategory && <div><dt>Type</dt><dd>{latestClassification.subcategory}</dd></div>}
+                  {latestClassification?.assigned_group && <div><dt>Assigned group</dt><dd>{latestClassification.assigned_group}</dd></div>}
+                </dl>
+                <div className="context-priority-row"><span>Priority</span><strong className={`context-priority context-priority--${(latestClassification?.priority ?? 'unset').toLowerCase()}`}>{latestClassification?.priority ?? '—'}</strong></div>
+              </section>
+              <section className="context-card">
+                <div className="context-card-heading"><span className="context-card-icon context-card-icon--blue">▤</span><h3>Knowledge sources</h3><span className="context-count">{latestResponse?.knowledge_sources?.length ?? 0}</span></div>
+                {latestResponse?.knowledge_sources?.length ? (
+                  <ul className="context-source-list">
+                    {latestResponse.knowledge_sources.slice(0, 4).map((source, index) => (
+                      <li key={`${source}-${index}`}><span>PDF</span><strong>{source}</strong></li>
+                    ))}
+                  </ul>
+                ) : <p className="context-empty">Sources will appear here when DeskAI finds relevant guidance.</p>}
+              </section>
+              <section className="context-card">
+                <div className="context-card-heading"><span className="context-card-icon context-card-icon--green">▣</span><h3>Ticket information</h3></div>
+                {latestTicket ? (
+                  <div className="context-ticket">
+                    <span>{latestTicket.ticket_number ?? latestTicket.ticket_id}</span>
+                    <strong>{latestTicket.title}</strong>
+                    <small>{latestTicket.assigned_group}</small>
+                  </div>
+                ) : latestTicketMessage?.agentResponse?.ticket_status ? (
+                  <div className="context-ticket">
+                    <span>{latestTicketMessage.agentResponse.ticket_status.ticket_id}</span>
+                    <strong>{latestTicketMessage.agentResponse.ticket_status.assigned_group ?? 'Service desk'}</strong>
+                  </div>
+                ) : <p className="context-empty">A ticket will appear here if one is created.</p>}
+                <div className="context-status-row"><span>Status</span><strong className={ticketStatus ? 'context-status context-status--active' : 'context-status'}><i />{ticketStatus ?? 'No ticket'}</strong></div>
+              </section>
+              <div className="context-assurance"><span>✦</span><p><strong>AI + human support</strong><br />Escalate to a person whenever you need.</p></div>
+            </aside>
+          </div>
+        ) : (
+          <main className="ticket-page-shell">
+            <TicketsDashboard
+              refreshKey={ticketsRefreshKey}
+              performanceStatus={performanceStatus}
             />
-            <ChatInput
-              value={draft}
-              isLoading={isChatLoading}
-              onChange={setDraft}
-              onSubmit={handleSend}
-            />
-            <p className="composer-privacy">
-              <svg viewBox="0 0 16 16" aria-hidden="true">
-                <rect x="3.5" y="7" width="9" height="7" rx="1.5" />
-                <path d="M5.5 7V5a2 2 0 0 1 4 0v2" />
-              </svg>
-              Your conversation stays within your workspace.
-            </p>
           </main>
-        </div>
-      ) : (
-        <main className="ticket-page-shell">
-          <TicketsDashboard
-            refreshKey={ticketsRefreshKey}
-            performanceStatus={performanceStatus}
-          />
-        </main>
-      )}
+        )}
+      </div>
+
       {handoffConversationId && (
         <HumanChatWidget
           conversationId={handoffConversationId}
@@ -632,9 +813,9 @@ export function Dashboard() {
           onClosed={handleHandoffClosed}
         />
       )}
-      {showHandoffPopup && handoffConversationId && (
+      {showHandoffPopup && handoffConversationId && handoffDisplayId && (
         <HumanSupportPopup
-          conversationId={handoffConversationId}
+          displayId={handoffDisplayId}
           onClose={() => setShowHandoffPopup(false)}
         />
       )}

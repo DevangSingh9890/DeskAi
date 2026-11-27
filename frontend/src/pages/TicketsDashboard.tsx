@@ -172,6 +172,7 @@ export function TicketsDashboard({
           aria-current={activeSection === 'tickets' ? 'page' : undefined}
           onClick={() => setActiveSection('tickets')}
         >
+          <span className="admin-section-icon" aria-hidden="true">▤</span>
           Ticket Center
         </button>
         <button
@@ -180,6 +181,7 @@ export function TicketsDashboard({
           aria-current={activeSection === 'analytics' ? 'page' : undefined}
           onClick={() => setActiveSection('analytics')}
         >
+          <span className="admin-section-icon" aria-hidden="true">⌁</span>
           Admin Analytics
         </button>
         <button
@@ -188,6 +190,7 @@ export function TicketsDashboard({
           aria-current={activeSection === 'human-support' ? 'page' : undefined}
           onClick={() => setActiveSection('human-support')}
         >
+          <span className="admin-section-icon" aria-hidden="true">◎</span>
           Human Support
         </button>
         <button
@@ -196,10 +199,12 @@ export function TicketsDashboard({
           aria-current={activeSection === 'knowledge-base' ? 'page' : undefined}
           onClick={() => setActiveSection('knowledge-base')}
         >
+          <span className="admin-section-icon" aria-hidden="true">▧</span>
           Knowledge Base
         </button>
       </nav>
 
+      <div className="admin-section-content">
       {activeSection === 'tickets' ? (
         <>
           <div className="ticket-metric-grid" aria-label="Ticket metrics">
@@ -333,6 +338,7 @@ export function TicketsDashboard({
       ) : (
         <KnowledgeBasePage performanceStatus={performanceStatus} />
       )}
+      </div>
 
       {selectedTicket && (
         <TicketDetailsDrawer

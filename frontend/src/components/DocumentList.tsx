@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { DocumentSummary } from '../services/documentService'
 
 interface DocumentListProps {
@@ -32,6 +33,11 @@ export function DocumentList({
   deletingId,
   onDelete,
 }: DocumentListProps) {
+  const [query, setQuery] = useState('')
+  const visibleDocuments = documents.filter((document) =>
+    document.filename.toLowerCase().includes(query.trim().toLowerCase()),
+  )
+
   return (
     <section className="document-list-section" aria-labelledby="document-list-title">
       <div className="sidebar-section-heading">
@@ -42,14 +48,28 @@ export function DocumentList({
         <span className="document-count">{documents.length}</span>
       </div>
 
+      <label className="document-search">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <circle cx="8.5" cy="8.5" r="5.5" />
+          <path d="m13 13 4 4" />
+        </svg>
+        <span className="sr-only">Search documents</span>
+        <input
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search documents"
+        />
+      </label>
+
       {isLoading ? (
         <div className="sidebar-loading" role="status">
           <span className="loading-spinner" />
           Loading documents…
         </div>
-      ) : documents.length ? (
+      ) : visibleDocuments.length ? (
         <ul className="document-list">
-          {documents.map((document) => (
+          {visibleDocuments.map((document) => (
             <li className="document-card" key={document.id}>
               <DocumentIcon filename={document.filename} />
               <div className="document-details">
@@ -109,6 +129,11 @@ export function DocumentList({
               >
                 {deletingId === document.id ? (
                   <span className="delete-spinner" aria-hidden="true" />
+                ) : documents.length ? (
+                  <div className="document-empty document-empty--filtered">
+                    <p>No matching documents</p>
+                    <span>Try a different search term.</span>
+                  </div>
                 ) : (
                   <svg viewBox="0 0 20 20" aria-hidden="true">
                     <path d="M4.5 6h11M8 6V4.5h4V6m2.5 0-.6 9.5H6.1L5.5 6m2.8 2.5v4.5m3.4-4.5v4.5" />

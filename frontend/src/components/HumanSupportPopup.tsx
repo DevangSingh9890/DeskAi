@@ -1,10 +1,10 @@
 interface HumanSupportPopupProps {
-  conversationId: string
+  displayId: string
   onClose: () => void
 }
 
 export function HumanSupportPopup({
-  conversationId,
+  displayId,
   onClose,
 }: HumanSupportPopupProps) {
   return (
@@ -26,7 +26,7 @@ export function HumanSupportPopup({
         <span className="handoff-confirmation__check" aria-hidden="true">✓</span>
         <h2 id="handoff-confirmation-title">Human Support Request Created</h2>
         <dl>
-          <div><dt>Reference ID</dt><dd>{conversationId}</dd></div>
+          <div><dt>Reference ID</dt><dd>{displayId}</dd></div>
           <div><dt>Status</dt><dd>Waiting for Human Support Engineer</dd></div>
         </dl>
         <p>Your conversation has been shared with the support team.</p>

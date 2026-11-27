@@ -44,6 +44,24 @@ export function KnowledgeBasePage({ performanceStatus }: KnowledgeBasePageProps)
         performanceStatus?.warmup_status !== 'completed'
       ),
   )
+  const indexedDocumentCount = documents.filter(
+    (document) => document.ingestion_status === 'Indexed',
+  ).length
+  const totalChunks = documents.reduce(
+    (total, document) => total + document.indexed_chunks,
+    0,
+  )
+  const knowledgeHealth = documents.some(
+    (document) => document.ingestion_status === 'Failed',
+  )
+    ? 'Needs attention'
+    : isIndexing
+      ? 'Indexing'
+      : documents.some((document) => document.ingestion_status !== 'Indexed')
+        ? 'Action needed'
+        : performanceStatus?.embedding_model_loaded
+          ? 'Healthy'
+          : 'Warming up'
   const processingDocumentIds = documents
     .filter((document) => document.ingestion_status === 'Processing')
     .map((document) => document.id)
@@ -255,6 +273,29 @@ export function KnowledgeBasePage({ performanceStatus }: KnowledgeBasePageProps)
             {notice}
           </div>
         )}
+
+        <div className="knowledge-stat-grid" aria-label="Knowledge base statistics">
+          <article className="knowledge-stat-card">
+            <span className="knowledge-stat-icon knowledge-stat-icon--violet">▧</span>
+            <div><p>Total documents</p><strong>{documents.length}</strong></div>
+            <small>in your library</small>
+          </article>
+          <article className="knowledge-stat-card">
+            <span className="knowledge-stat-icon knowledge-stat-icon--green">✓</span>
+            <div><p>Indexed documents</p><strong>{indexedDocumentCount}</strong></div>
+            <small>ready for AI search</small>
+          </article>
+          <article className="knowledge-stat-card">
+            <span className="knowledge-stat-icon knowledge-stat-icon--blue">▤</span>
+            <div><p>Total chunks</p><strong>{totalChunks.toLocaleString()}</strong></div>
+            <small>knowledge segments</small>
+          </article>
+          <article className="knowledge-stat-card">
+            <span className="knowledge-stat-icon knowledge-stat-icon--amber">✦</span>
+            <div><p>Knowledge health</p><strong className="knowledge-health-value">{knowledgeHealth}</strong></div>
+            <small>RAG engine {performanceStatus?.embedding_model_loaded ? 'connected' : 'warming up'}</small>
+          </article>
+        </div>
 
         <SidebarKnowledgeBase
           documents={documents}

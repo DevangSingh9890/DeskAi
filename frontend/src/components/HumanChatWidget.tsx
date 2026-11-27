@@ -6,6 +6,7 @@ import {
   sendHumanMessage,
 } from '../services/handoffService'
 import type { HumanConversation, HumanChatMessage } from '../types/handoff'
+import { formatServiceRequestId } from '../utils/handoff'
 
 interface HumanChatWidgetProps {
   conversationId: string
@@ -24,7 +25,8 @@ export function HumanChatWidget({
   const [minimized, setMinimized] = useState(initiallyMinimized)
   const [error, setError] = useState<string | null>(null)
   const [isSending, setIsSending] = useState(false)
-  const endRef = useRef<HTMLDivElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
+  const shouldAutoScrollRef = useRef(true)
 
   useEffect(() => {
     let active = true
@@ -44,7 +46,14 @@ export function HumanChatWidget({
           return
         }
         setConversation(detail.conversation)
-        setMessages(detail.messages)
+        setMessages((currentMessages) => {
+          const unchanged =
+            currentMessages.length === detail.messages.length &&
+            currentMessages.every(
+              (message, index) => message.id === detail.messages[index]?.id,
+            )
+          return unchanged ? currentMessages : detail.messages
+        })
         setError(null)
       } catch (pollError: unknown) {
         if (active) setError(getHandoffErrorMessage(pollError))
@@ -63,8 +72,34 @@ export function HumanChatWidget({
   }, [conversationId, onClosed])
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [messages, minimized])
+    shouldAutoScrollRef.current = true
+  }, [conversationId])
+
+  const latestMessageId = messages[messages.length - 1]?.id
+
+  useEffect(() => {
+    const messagesContainer = messagesContainerRef.current
+    if (!minimized && shouldAutoScrollRef.current && messagesContainer) {
+      messagesContainer.scrollTo({
+        top: messagesContainer.scrollHeight,
+        behavior: 'smooth',
+      })
+    }
+  }, [latestMessageId, minimized])
+
+  function handleMessagesScroll() {
+    const messagesContainer = messagesContainerRef.current
+    if (!messagesContainer) return
+    shouldAutoScrollRef.current =
+      messagesContainer.scrollHeight -
+        messagesContainer.scrollTop -
+        messagesContainer.clientHeight <
+      64
+  }
+
+  const displayId = conversation
+    ? formatServiceRequestId(conversation.id)
+    : 'Support request'
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -101,7 +136,7 @@ export function HumanChatWidget({
       >
         <span aria-hidden="true">✦</span>
         <span>Support chat</span>
-        <span className="human-chat-launcher__id">{conversationId}</span>
+        <span className="human-chat-launcher__id">{displayId}</span>
       </button>
     )
   }
@@ -120,9 +155,14 @@ export function HumanChatWidget({
         {conversation?.status === 'Pending' || conversation?.status === 'Waiting'
           ? 'Waiting for Human Support Engineer'
           : conversation?.status ?? 'Connecting'}
-        <small>{conversationId}</small>
+        <small>{displayId}</small>
       </div>
-      <div className="human-chat-widget__messages" aria-live="polite">
+      <div
+        className="human-chat-widget__messages"
+        ref={messagesContainerRef}
+        onScroll={handleMessagesScroll}
+        aria-live="polite"
+      >
         {messages.map((message) => (
           <article
             className={`human-chat-message human-chat-message--${message.sender_type}`}
@@ -135,7 +175,6 @@ export function HumanChatWidget({
             </time>
           </article>
         ))}
-        <div ref={endRef} />
       </div>
       {error && <p className="human-chat-widget__error" role="alert">{error}</p>}
       <form className="human-chat-widget__composer" onSubmit={(event) => void handleSubmit(event)}>

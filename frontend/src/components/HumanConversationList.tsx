@@ -4,6 +4,9 @@ import type { HumanConversationStatus, HumanConversationSummary } from '../types
 interface HumanConversationListProps {
   conversations: HumanConversationSummary[]
   selectedId: string | null
+  displayIdByConversationId: ReadonlyMap<string, string>
+  unreadIds: ReadonlySet<string>
+  lastMessagePreview: Readonly<Record<string, string>>
   filter: ConversationFilter
   onFilterChange: (filter: ConversationFilter) => void
   onSelect: (conversationId: string) => void
@@ -25,6 +28,9 @@ const filters: ConversationFilter[] = [
 export function HumanConversationList({
   conversations,
   selectedId,
+  displayIdByConversationId,
+  unreadIds,
+  lastMessagePreview,
   filter,
   onFilterChange,
   onSelect,
@@ -41,7 +47,7 @@ export function HumanConversationList({
   const visible = search
     ? filtered.filter((conversation) =>
         [
-          conversation.conversation_id,
+          displayIdByConversationId.get(conversation.conversation_id) ?? '',
           conversation.ticket_id,
           conversation.category,
           conversation.priority,
@@ -97,7 +103,7 @@ export function HumanConversationList({
             onClick={() => onSelect(conversation.conversation_id)}
           >
             <span className="human-queue-row__top">
-              <strong>{conversation.conversation_id}</strong>
+              <strong>{displayIdByConversationId.get(conversation.conversation_id)}</strong>
               <span className={`human-status-label human-status-label--${conversation.status.toLowerCase().replace(' ', '-')}`}>
                 {conversation.status === 'Waiting' ? 'Pending' : conversation.status}
               </span>
@@ -108,7 +114,28 @@ export function HumanConversationList({
                 <span aria-hidden="true">●</span> {conversation.priority}
               </span>
             </span>
-            <time dateTime={conversation.created_at}>{new Date(conversation.created_at).toLocaleString()}</time>
+            <span className="human-queue-row__preview">
+              {lastMessagePreview[conversation.conversation_id] ??
+                'Open conversation to load latest message'}
+            </span>
+            <span className="human-queue-row__activity">
+              {unreadIds.has(conversation.conversation_id) && (
+                <span
+                  className="human-queue-row__unread"
+                  title="New activity since this conversation was last viewed"
+                >
+                  New
+                </span>
+              )}
+              <time dateTime={conversation.updated_at}>
+                {new Date(conversation.updated_at).toLocaleString([], {
+                  month: 'short',
+                  day: 'numeric',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                })}
+              </time>
+            </span>
           </button>
         ))}
       </div>

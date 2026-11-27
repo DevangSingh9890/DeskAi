@@ -64,11 +64,23 @@ export function ChatContainer({
   handoffError,
   handoffExists,
 }: ChatContainerProps) {
-  const endOfMessagesRef = useRef<HTMLDivElement>(null)
+  const messageListRef = useRef<HTMLDivElement>(null)
+  const shouldAutoScrollRef = useRef(true)
+  const latestMessageId = messages[messages.length - 1]?.id
 
   useEffect(() => {
-    endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [messages, isLoading])
+    const messageList = messageListRef.current
+    if (shouldAutoScrollRef.current && messageList) {
+      messageList.scrollTo({ top: messageList.scrollHeight, behavior: 'smooth' })
+    }
+  }, [latestMessageId, isLoading])
+
+  function handleMessageListScroll() {
+    const messageList = messageListRef.current
+    if (!messageList) return
+    shouldAutoScrollRef.current =
+      messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight < 80
+  }
 
   return (
     <section className="chat-container" aria-label="AI assistant conversation">
@@ -96,6 +108,8 @@ export function ChatContainer({
 
       <div
         className="message-list"
+        ref={messageListRef}
+        onScroll={handleMessageListScroll}
         aria-label="Conversation messages"
         aria-live="polite"
         aria-relevant="additions"
@@ -136,7 +150,6 @@ export function ChatContainer({
         {isLoading && (
           <ThinkingIndicator />
         )}
-        <div ref={endOfMessagesRef} />
       </div>
 
       {error && (
